@@ -7,7 +7,7 @@
 
 **mc-leaner** is a safe-by-default macOS cleaner for people who want control, not magic.
 
-It helps you **identify and remove leftover system clutter**—especially launchd orphans and legacy binaries—**without breaking your system**.
+It helps you **identify and safely relocate leftover system clutter**—especially launchd orphans and legacy binaries—**without breaking your system**.
 
 No silent actions.  
 No “optimization.”  
@@ -139,6 +139,8 @@ bash mc-leaner.sh --mode bins-only
 # /usr/local/bin only (apply)
 bash mc-leaner.sh --mode bins-only --apply
 ```
+
+All commands default to dry-run unless `--apply` is explicitly provided.
 
 ---
 

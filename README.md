@@ -1,88 +1,184 @@
 # mc-leaner
 
-Safe, interactive Mac Cleaner for launchd plists (LaunchAgents/LaunchDaemons) and typical Intel leftovers.
+![macOS](https://img.shields.io/badge/macOS-supported-brightgreen)
+![Bash](https://img.shields.io/badge/bash-3.2%2B-blue)
+![License](https://img.shields.io/badge/license-MIT-lightgrey)
+![Status](https://img.shields.io/badge/status-early--but--stable-orange)
 
-This tool moves suspected orphaned items to a timestamped backup folder on your Desktop instead of deleting them.
+**mc-leaner** is a safe-by-default macOS cleaner for people who want control, not magic.
 
-## What it does
+It helps you **identify and remove leftover system clutter**—especially launchd orphans and legacy binaries—**without breaking your system**.
 
+No silent actions.  
+No “optimization.”  
+No deletions.
+
+---
+
+## Philosophy
+
+mc-leaner is built on a simple idea:
+
+> macOS maintenance should be **inspectable, reversible, and boring**.
+
+Most “Mac cleaner” tools are dangerous because they:
+- delete things you cannot easily restore
+- hide what they are doing
+- optimize for speed, not safety
+
+mc-leaner takes the opposite approach:
+- everything is opt-in
+- everything is explained
+- everything can be undone
+
+If you want a button that says *“Clean My Mac”*, this tool is not for you.
+
+If you want to understand what is running on your system—and clean it safely—this is.
+
+---
+
+## What mc-leaner does (v1)
+
+### Launchd hygiene
 - Scans:
-  - /Library/LaunchAgents
-  - /Library/LaunchDaemons
-  - ~/Library/LaunchAgents
-- Skips:
-  - active launchctl jobs
-  - known security tools (Bitdefender, Malwarebytes)
-  - Homebrew service labels (homebrew.mxcl.*) if enabled in the script
-- Offers a GUI prompt for every move.
-- Writes a report of Intel-only executables to ~/Desktop/intel_binaries.txt
+  - `/Library/LaunchAgents`
+  - `/Library/LaunchDaemons`
+  - `~/Library/LaunchAgents`
+- Detects **suspected orphaned** launchd plists by:
+  - skipping active `launchctl` jobs
+  - skipping known installed apps
+  - skipping Homebrew-managed services
+  - skipping known security and endpoint software
+- Prompts before every action
+- Moves files to a **timestamped backup folder** on your Desktop
 
-## What it does NOT do
+### Binary inspection
+- Optionally inspects `/usr/local/bin` for legacy or unmanaged binaries
+- Conservative and heuristic-based by design
 
-- It does not delete files.
-- It does not uninstall apps.
-- It does not modify app bundles.
+### Architecture reporting
+- Generates a report of **Intel-only executables** at:
+  - `~/Desktop/intel_binaries.txt`
+- Reporting only. No removal.
 
-## Safety rules
+---
 
-1. Do not remove security software daemons unless you are intentionally uninstalling that product.
-2. Prefer uninstalling apps normally before removing their launchd plists.
-3. Always reboot after moving system daemons to confirm everything still works.
-4. If something breaks, restore the plist from the backup folder and reboot.
+## What it explicitly does NOT do
+
+- No file deletion
+- No app uninstallation
+- No modification of app bundles
+- No system “optimization”
+- No background or automated runs
+
+Every action requires user confirmation.
+
+---
+
+## Safety model
+
+1. **Dry-run by default**  
+   Nothing is moved unless you explicitly use `--apply`.
+
+2. **No destructive actions**  
+   Files are moved, never deleted.
+
+3. **Hard protection rules**  
+   Known security and endpoint tools are always skipped.
+
+4. **User-controlled scope**  
+   You decide which modules run.
+
+5. **Always reversible**  
+   Restore by moving files back and rebooting.
+
+---
 
 ## Requirements
 
 - macOS
-- bash (macOS default is fine)
-- osascript (built-in)
-- launchctl (built-in)
-- Homebrew (optional)
+- Bash (macOS default supported)
+- `launchctl` (built-in)
+- `osascript` (optional, for GUI prompts)
+- Homebrew (optional, improves detection accuracy)
 
-## Proposed Structure
-
-```tree
-- mc-leaner/
-├── mc-leaner.sh              # Entry point (CLI dispatcher)
-├── modules/
-│   ├── launchd.sh            # LaunchAgents / LaunchDaemons (current)
-│   ├── bins.sh               # /usr/local/bin orphan checks
-│   ├── intel.sh              # Intel-only binary report
-│   ├── caches.sh             # User/system cache inspection (future)
-│   ├── brew.sh               # Homebrew hygiene (future)
-│   ├── leftovers.sh          # App uninstall leftovers (future)
-│   ├── logs.sh               # Log growth inspection (future)
-│   └── permissions.sh        # Suspicious permissions audit (future)
-├── lib/
-│   ├── cli.sh                # Arg parsing, usage, help
-│   ├── ui.sh                 # GUI + terminal prompts
-│   ├── fs.sh                 # Safe move, sudo detection
-│   ├── safety.sh             # Hard skip rules
-│   └── utils.sh              # Shared helpers
-├── config/
-│   ├── skip-labels.conf      # Security / protected labels
-│   ├── skip-paths.conf       # Never-touch paths
-│   └── modes.conf            # Mode → module mapping
-├── docs/
-│   ├── ROADMAP.md
-│   ├── MODULES.md
-│   ├── SAFETY.md
-│   └── FAQ.md
-├── assets/
-│   └── social-preview.png
-├── README.md
-└── LICENSE
-```
+---
 
 ## Usage
 
+Recommended first run (dry-run):
+
 ```bash
-bash orphan_cleaner.sh
+bash mc-leaner.sh --all --dry-run
 ```
+
+Apply changes:
+
+```bash
+bash mc-leaner.sh --all --apply
+```
+
+Disable GUI dialogs:
+
+```bash
+bash mc-leaner.sh --all --apply --no-gui
+```
+
+Run a specific module:
+
+```bash
+bash mc-leaner.sh --launchd
+bash mc-leaner.sh --intel
+```
+
+---
 
 ## Restore
 
-Move items back from the backup folder to their original locations and reboot.
+1. Open the backup folder created on your Desktop  
+2. Move files back to their original locations  
+3. Reboot
+
+---
+
+## Project structure (designed for expansion)
+
+```text
+mc-leaner/
+├── mc-leaner.sh
+├── modules/
+│   ├── launchd.sh
+│   ├── bins.sh
+│   ├── intel.sh
+│   ├── caches.sh        # planned
+│   ├── brew.sh          # planned
+│   ├── leftovers.sh    # planned
+│   ├── logs.sh          # planned
+│   └── permissions.sh  # planned
+├── lib/
+├── config/
+├── docs/
+├── assets/
+└── LICENSE
+```
+
+---
+
+## Roadmap (high level)
+
+Future modules focus on **visibility first, cleanup second**:
+
+- User-level cache inspection
+- Homebrew hygiene and diagnostics
+- App uninstall leftovers
+- Log growth analysis
+- Privacy and permissions audit
+
+No auto-clean. No silent behavior.
+
+---
 
 ## Disclaimer
 
-Use at your own risk. This project is provided with no warranty.
+This software is provided “as is”, without warranty of any kind.  
+You are responsible for reviewing and approving every action.

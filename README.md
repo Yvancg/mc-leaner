@@ -145,6 +145,10 @@ bash mc-leaner.sh --intel
 
 ```text
 mc-leaner/
+├── docs/
+│   ├── FAQ.md
+│   ├── ROADMAP.md
+│   └── SAFETY.md
 ├── mc-leaner.sh
 ├── modules/
 │   ├── launchd.sh
@@ -159,6 +163,7 @@ mc-leaner/
 ├── config/
 ├── docs/
 ├── assets/
+├── CONTRIBUTING
 └── LICENSE
 ```
 

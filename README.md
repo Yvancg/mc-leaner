@@ -163,6 +163,7 @@ mc-leaner/
 ├── config/
 ├── docs/
 ├── assets/
+├── CODING_STANDARDS
 ├── CONTRIBUTING
 └── LICENSE
 ```

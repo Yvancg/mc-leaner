@@ -106,29 +106,38 @@ Every action requires user confirmation.
 
 ## Usage
 
-Recommended first run (dry-run):
+Recommended first run (dry-run, no files moved):
 
 ```bash
-bash mc-leaner.sh --all --dry-run
+bash mc-leaner.sh
 ```
 
-Apply changes:
+Interactive clean (moves items to backup, never deletes):
 
 ```bash
-bash mc-leaner.sh --all --apply
+bash mc-leaner.sh --mode clean --apply
 ```
 
-Disable GUI dialogs:
+Generate Intel-only executable report:
 
 ```bash
-bash mc-leaner.sh --all --apply --no-gui
+bash mc-leaner.sh --mode report
 ```
 
 Run a specific module:
 
 ```bash
-bash mc-leaner.sh --launchd
-bash mc-leaner.sh --intel
+# launchd only (dry-run)
+bash mc-leaner.sh --mode launchd-only
+
+# launchd only (apply)
+bash mc-leaner.sh --mode launchd-only --apply
+
+# /usr/local/bin only (dry-run)
+bash mc-leaner.sh --mode bins-only
+
+# /usr/local/bin only (apply)
+bash mc-leaner.sh --mode bins-only --apply
 ```
 
 ---

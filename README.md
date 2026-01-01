@@ -154,14 +154,10 @@ bash mc-leaner.sh --mode bins-only --apply
 
 ```text
 mc-leaner/
-├── docs/
-│   ├── FAQ.md
-│   ├── ROADMAP.md
-│   └── SAFETY.md
 ├── mc-leaner.sh
 ├── modules/
 │   ├── launchd.sh
-│   ├── bins.sh
+│   ├── bins_usr_local.sh
 │   ├── intel.sh
 │   ├── caches.sh        # planned
 │   ├── brew.sh          # planned
@@ -169,11 +165,23 @@ mc-leaner/
 │   ├── logs.sh          # planned
 │   └── permissions.sh  # planned
 ├── lib/
+│   ├── cli.sh
+│   ├── ui.sh
+│   ├── fs.sh
+│   ├── safety.sh
+│   └── utils.sh
 ├── config/
+│   ├── protected-labels.conf   # security & never-touch rules
+│   └── modes.conf              # mode → module mapping (future)
 ├── docs/
+│   ├── FAQ.md
+│   ├── SAFETY.md
+│   └── ROADMAP.md
 ├── assets/
-├── CODING_STANDARDS
-├── CONTRIBUTING
+│   └── social-preview.png
+├── CONTRIBUTING.md
+├── CODING_STANDARDS.md
+├── README.md
 └── LICENSE
 ```
 

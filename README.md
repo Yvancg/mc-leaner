@@ -4,6 +4,7 @@
 ![Bash](https://img.shields.io/badge/bash-3.2%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-lightgrey)
 ![Status](https://img.shields.io/badge/status-early--but--stable-orange)
+[![Security Policy](https://img.shields.io/badge/security-policy-blue)](SECURITY.md)
 
 **mc-leaner** is a safe-by-default macOS cleaner for people who want control, not magic.
 

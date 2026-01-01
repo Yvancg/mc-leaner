@@ -1,0 +1,5 @@
+.DS_Store
+*.log
+/tmp/
+intel_binaries.txt
+Orphaned_Backups_*/

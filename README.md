@@ -23,11 +23,13 @@ mc-leaner is built on a simple idea:
 > macOS maintenance should be **inspectable, reversible, and boring**.
 
 Most “Mac cleaner” tools are dangerous because they:
+
 - delete things you cannot easily restore
 - hide what they are doing
 - optimize for speed, not safety
 
 mc-leaner takes the opposite approach:
+
 - everything is opt-in
 - everything is explained
 - everything can be undone
@@ -41,6 +43,7 @@ If you want to understand what is running on your system—and clean it safely�
 ## What mc-leaner does (v1)
 
 ### Launchd hygiene
+
 - Scans:
   - `/Library/LaunchAgents`
   - `/Library/LaunchDaemons`
@@ -52,12 +55,69 @@ If you want to understand what is running on your system—and clean it safely�
   - skipping known security and endpoint software
 - Prompts before every action
 - Moves files to a **timestamped backup folder** on your Desktop
+- Supports `--explain` flag to provide detailed reasoning per item
 
-### Binary inspection
+### /usr/local/bin inspection
+
 - Optionally inspects `/usr/local/bin` for legacy or unmanaged binaries
 - Conservative and heuristic-based by design
+- Supports `--explain` flag to clarify detection logic
+
+### Cache inspection (user-level)
+
+- Inspects large user-level cache directories only:
+  - `~/Library/Caches/*`
+  - `~/Library/Containers/*/Data/Library/Caches`
+- Reports:
+  - cache size
+  - last modified time
+  - best-effort owning app or bundle identifier
+- Groups caches by app for easier review
+- `--explain` flag shows top subfolders by size within each cache
+- Inspection-first by default (no moves)
+- Optional cleanup:
+  - requires `--apply`
+  - user-confirmed per cache
+  - moves caches to backup (never deletes)
+
+#### Example output (inspect mode)
+
+```text
+[2026-01-02 14:14:33] Caches: scanned 88 directories; found 4 >= 200MB.
+
+CACHE GROUP: Google
+CACHE? 1799MB | modified: 2025-02-03 13:13:57 | owner: Google
+  path: ~/Library/Caches/Google
+  Subfolders (top 3 by size):
+    - 1799MB | Chrome
+
+CACHE GROUP: Homebrew
+CACHE? 438MB | modified: 2026-01-02 12:27:04 | owner: Homebrew
+  path: ~/Library/Caches/Homebrew
+  Subfolders (top 3 by size):
+    - 366MB | downloads
+    - 46MB  | api
+    - 13MB  | bootsnap
+
+CACHE GROUP: WhatsApp (net.whatsapp.WhatsApp)
+CACHE? 643MB | modified: 2025-11-13 17:44:31 | owner: WhatsApp
+  path: ~/Library/Caches/net.whatsapp.WhatsApp
+  Subfolders (top 3 by size):
+    - 643MB | org.sparkle-project.Sparkle
+
+CACHE GROUP: ms-playwright
+CACHE? 476MB | modified: 2025-09-30 10:56:42 | owner: ms-playwright
+  path: ~/Library/Caches/ms-playwright
+  Subfolders (top 3 by size):
+    - 297MB | chromium-1193
+    - 176MB | chromium_headless_shell-1193
+    - 2MB   | ffmpeg-1011
+
+Caches: total large caches (by heuristics): 3356MB
+```
 
 ### Architecture reporting
+
 - Generates a report of **Intel-only executables** at:
   - `~/Desktop/intel_binaries.txt`
 - Reporting only. No removal.
@@ -125,6 +185,18 @@ Generate Intel-only executable report:
 bash mc-leaner.sh --mode report
 ```
 
+Inspect large user-level caches (dry-run):
+
+```bash
+bash mc-leaner.sh --mode caches-only
+```
+
+Inspect and optionally relocate large user-level caches:
+
+```bash
+bash mc-leaner.sh --mode caches-only --apply
+```
+
 Run a specific module:
 
 ```bash
@@ -139,6 +211,19 @@ bash mc-leaner.sh --mode bins-only
 
 # /usr/local/bin only (apply)
 bash mc-leaner.sh --mode bins-only --apply
+```
+
+Use the `--explain` flag to get detailed explanations of findings:
+
+```bash
+# launchd only with explanations
+bash mc-leaner.sh --mode launchd-only --explain
+
+# /usr/local/bin inspection with explanations
+bash mc-leaner.sh --mode bins-only --explain
+
+# caches inspection showing top subfolders
+bash mc-leaner.sh --mode caches-only --explain
 ```
 
 All commands default to dry-run unless `--apply` is explicitly provided.
@@ -162,11 +247,11 @@ mc-leaner/
 │   ├── launchd.sh
 │   ├── bins_usr_local.sh
 │   ├── intel.sh
-│   ├── caches.sh        # planned
+│   ├── caches.sh        # user-level cache inspection (implemented)
 │   ├── brew.sh          # planned
-│   ├── leftovers.sh    # planned
+│   ├── leftovers.sh     # planned
 │   ├── logs.sh          # planned
-│   └── permissions.sh  # planned
+│   └── permissions.sh   # planned
 ├── lib/
 │   ├── cli.sh
 │   ├── ui.sh
@@ -194,7 +279,6 @@ mc-leaner/
 
 Future modules focus on **visibility first, cleanup second**:
 
-- User-level cache inspection
 - Homebrew hygiene and diagnostics
 - App uninstall leftovers
 - Log growth analysis

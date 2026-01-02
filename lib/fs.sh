@@ -37,4 +37,36 @@ safe_move() {
   fi
 }
 
+
+# ----------------------------
+# Safe relocation (files or directories)
+# ----------------------------
+
+# Purpose: Move a file or directory into a backup directory, preserving its basename
+# Safety: Uses `sudo` only if the source parent directory is not writable by the current user
+safe_move_path() {
+  local src="$1"
+  local dst_dir="$2"
+
+  # No-op if the source does not exist (modules may race with system changes)
+  [[ -e "$src" ]] || return 0
+
+  ensure_dir "$dst_dir"
+
+  local base
+  base="$(basename "$src")"
+
+  local dst="$dst_dir/$base"
+  if [[ -e "$dst" ]]; then
+    dst="$dst_dir/${base}_$(date +%Y%m%d_%H%M%S)"
+  fi
+
+  # SAFETY: only elevate privileges when required to move paths from protected locations
+  if [[ -w "$(dirname "$src")" ]]; then
+    mv "$src" "$dst"
+  else
+    sudo mv "$src" "$dst"
+  fi
+}
+
 # End of library

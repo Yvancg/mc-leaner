@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo/mcleaner-logo.png" alt="mc-leaner logo" width="120">
+</p>
+
 # mc-leaner
 
 ![macOS](https://img.shields.io/badge/macOS-supported-brightgreen)

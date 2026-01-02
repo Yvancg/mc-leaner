@@ -1,11 +1,17 @@
 #!/bin/bash
+# mc-leaner: CLI entry point
+# Purpose: Parse arguments, assemble system context, and dispatch selected modules
+# Safety: Defaults to dry-run; any file moves require explicit `--apply`; no deletions
+
 set -euo pipefail
 
-# mc-leaner: safe, interactive Mac cleaner (launchd + leftovers)
-# Default: scan (dry-run). Use --mode clean --apply to move items.
+# ----------------------------
+# Bootstrap
+# ----------------------------
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
+# ----------------------------
+# Load shared libraries and modules
+# ----------------------------
 # shellcheck source=lib/*.sh
 source "$ROOT_DIR/lib/utils.sh"
 source "$ROOT_DIR/lib/cli.sh"
@@ -17,17 +23,28 @@ source "$ROOT_DIR/modules/launchd.sh"
 source "$ROOT_DIR/modules/bins_usr_local.sh"
 source "$ROOT_DIR/modules/intel.sh"
 
+# ----------------------------
+# Parse CLI arguments
+# ----------------------------
 parse_args "$@"
 
+# ----------------------------
+# Resolve backup directory
+# ----------------------------
 if [[ -z "${BACKUP_DIR:-}" ]]; then
   BACKUP_DIR="$HOME/Desktop/McLeaner_Backups_$(date +%Y%m%d_%H%M%S)"
 fi
 
+# ----------------------------
+# Log resolved execution plan
+# ----------------------------
 log "Mode: $MODE"
 log "Apply: $APPLY"
 log "Backup: $BACKUP_DIR"
 
-# Build known apps list
+# ----------------------------
+# Build known-app inventory for heuristic matching
+# ----------------------------
 installed_apps_file="$(tmpfile)"
 brew_formulae_file="$(tmpfile)"
 known_apps_file="$(tmpfile)"
@@ -47,6 +64,9 @@ fi
 
 cat "$installed_apps_file" "$brew_formulae_file" > "$known_apps_file" 2>/dev/null || true
 
+# ----------------------------
+# Dispatch by mode
+# ----------------------------
 case "$MODE" in
   scan)
     run_launchd_module "scan" "false" "$BACKUP_DIR" "$known_apps_file"
@@ -55,7 +75,7 @@ case "$MODE" in
     ;;
   clean)
     if [[ "$APPLY" != "true" ]]; then
-      echo "Refusing to clean without --apply"
+      echo "Refusing to clean without --apply (safety default)"
       exit 1
     fi
     run_launchd_module "clean" "true" "$BACKUP_DIR" "$known_apps_file"
@@ -86,4 +106,4 @@ case "$MODE" in
     ;;
 esac
 
-log "Done."
+log "Done."  # End of run

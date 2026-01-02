@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   version="1.1"
+   id="svg1"
+   width="1550.0863"
+   height="1033.5602"
+   viewBox="0 0 1550.0863 1033.5602"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <defs
+     id="defs1" />
+  <g
+     id="g1"
+     transform="translate(-4.2180855,0.25399661)">
+    <rect
+       style="fill:#010101;fill-opacity:1;stroke:#864345;stroke-width:0.508;stroke-opacity:1"
+       id="rect23"
+       width="1549.5782"
+       height="1033.0521"
+       x="4.4720855"
+       y="3.4011789e-06" />
+    <g
+       id="g23"
+       transform="translate(20.228079,80.029845)">
+      <path
+         style="fill:#f6f5f6;fill-opacity:1;stroke-width:0.523397"
+         d="m 533.10968,299.91036 v 204.09382 l -108.32672,69.0779 V 334.44931 Z"
+         id="path14" />
+      <path
+         style="fill:#a70d0e;fill-opacity:1;stroke-width:0.508"
+         d="M 424.77819,367.42683 V 544.52278 L 509.85987,490.3226 V 331.50345 Z"
+         id="path17" />
+      <path
+         style="fill:#ebeaeb;fill-opacity:1;stroke-width:0.508"
+         d="m 424.77864,428.44397 v 79.40957 l 41.59549,-23.94892 v -76.88863 z"
+         id="path18" />
+      <text
+         xml:space="preserve"
+         style="font-weight:bold;font-size:146.667px;line-height:166.667px;font-family:Arial;-inkscape-font-specification:'Arial Bold';text-align:center;letter-spacing:-5.86px;text-anchor:middle;fill:#db0d11;fill-opacity:1;stroke-width:0.763772"
+         x="884.1001"
+         y="467.90189"
+         id="text12"><tspan
+           id="tspan12"
+           x="881.1701"
+           y="467.90189"
+           style="font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;font-size:146.667px;line-height:166.667px;font-family:Inter;-inkscape-font-specification:'Inter Bold';letter-spacing:-5.86px;fill:#db0d11;fill-opacity:1;stroke-width:0.763772"
+           dx="-1.64">Mc<tspan
+   style="font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;font-size:146.667px;line-height:166.667px;font-family:Inter;-inkscape-font-specification:'Inter Bold';letter-spacing:-5.86px;fill:#ffffff;stroke-width:0.763772"
+   id="tspan13">Leaner</tspan></tspan></text>
+      <path
+         style="fill:#fefefe;fill-opacity:1;stroke-width:0.523397"
+         d="m 316.47251,299.91036 v 204.09382 l 108.32672,69.0779 V 334.44931 Z"
+         id="path21" />
+      <path
+         style="fill:#dc0d13;fill-opacity:1;stroke-width:0.508"
+         d="M 424.804,367.42683 V 544.52278 L 339.72232,490.3226 V 331.50345 Z"
+         id="path22" />
+      <path
+         style="fill:#fefefe;fill-opacity:1;stroke-width:0.508"
+         d="m 424.80355,428.44397 v 79.40957 l -41.59549,-23.94892 v -76.88863 z"
+         id="path23" />
+    </g>
+  </g>
+</svg>

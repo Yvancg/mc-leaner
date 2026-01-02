@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo/mcleaner-logo.png" alt="mc-leaner logo" width="auto">
+  <img src="assets/logo/mcleaner-logo_Image.svg" alt="mc-leaner logo" width="100%">
 </p>
 
 # mc-leaner

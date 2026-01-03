@@ -1,8 +1,6 @@
-<p align="center">
-  <img src="assets/logo/mcleaner-logo_Image.svg" alt="mc-leaner logo" width="100%">
-</p>
-
 # mc-leaner
+
+![McLeaner Social Image](assets/logo/mcleaner-logo_Image.svg)
 
 ![macOS](https://img.shields.io/badge/macOS-supported-brightgreen)
 ![Bash](https://img.shields.io/badge/bash-3.2%2B-blue)

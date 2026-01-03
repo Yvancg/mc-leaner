@@ -118,6 +118,27 @@ CACHE? 476MB | modified: 2025-09-30 10:56:42 | owner: ms-playwright
 Caches: total large caches (by heuristics): 3356MB
 ```
 
+### Log inspection (inspection-first)
+
+- Inspects log files and directories exceeding a size threshold (default: 50MB)
+- Scans:
+  - `~/Library/Logs`
+  - `/Library/Logs`
+  - `/var/log`
+- Reports:
+  - size
+  - last modified time
+  - best-effort owning app or subsystem
+- Groups related logs where possible
+- `--explain` flag provides:
+  - rotation siblings (e.g. `.1`, `.2`, `.gz`)
+  - top subfolders by size for large log directories
+- Inspection-first by default (no moves)
+- Optional cleanup:
+  - requires `--apply`
+  - user-confirmed per item
+  - moves logs to backup (never deletes)
+
 ### Architecture reporting
 
 - Generates a report of **Intel-only executables** at:
@@ -199,6 +220,24 @@ Inspect and optionally relocate large user-level caches:
 bash mc-leaner.sh --mode caches-only --apply
 ```
 
+Inspect large log files and directories (dry-run):
+
+```bash
+bash mc-leaner.sh --mode logs-only
+```
+
+Inspect logs with detailed explanations:
+
+```bash
+bash mc-leaner.sh --mode logs-only --explain
+```
+
+Inspect and optionally relocate selected logs:
+
+```bash
+bash mc-leaner.sh --mode logs-only --apply
+```
+
 Run a specific module:
 
 ```bash
@@ -252,7 +291,7 @@ mc-leaner/
 │   ├── caches.sh        # user-level cache inspection (implemented)
 │   ├── brew.sh          # planned
 │   ├── leftovers.sh     # planned
-│   ├── logs.sh          # planned
+│   ├── logs.sh          # log inspection (implemented)
 │   └── permissions.sh   # planned
 ├── lib/
 │   ├── cli.sh
@@ -283,7 +322,6 @@ Future modules focus on **visibility first, cleanup second**:
 
 - Homebrew hygiene and diagnostics
 - App uninstall leftovers
-- Log growth analysis
 - Privacy and permissions audit
 
 No auto-clean. No silent behavior.

@@ -1,0 +1,327 @@
+
+
+#!/bin/bash
+# mc-leaner: logs module (inspection-first)
+# Purpose: identify large log files and log directories (user + system)
+# Safety: dry-run by default; optional move-to-backup when --apply is used
+
+set -euo pipefail
+
+# ----------------------------
+# Defensive: ensure explain_log exists
+# ----------------------------
+if ! type explain_log >/dev/null 2>&1; then
+  explain_log() {
+    # Purpose: best-effort verbose logging when --explain is enabled
+    # Safety: logging only
+    if [[ "${EXPLAIN:-false}" == "true" ]]; then
+      log "$@"
+    fi
+  }
+fi
+
+# ----------------------------
+# Helpers
+# ----------------------------
+_logs_mtime() {
+  # Purpose: human-readable mtime for a path
+  # Notes: BSD stat on macOS
+  local p="$1"
+  stat -f "%Sm" -t "%Y-%m-%d %H:%M:%S" "$p" 2>/dev/null || echo "unknown"
+}
+
+_logs_owner_label() {
+  # Purpose: best-effort "owner" grouping label
+  # Inputs: absolute path to a log file/dir
+  local p="$1"
+
+  case "$p" in
+    "$HOME/Library/Logs"/*)
+      # ~/Library/Logs/<owner>/...
+      echo "$(echo "$p" | sed -E "s|^$HOME/Library/Logs/([^/]+).*|\\1|")"
+      ;;
+    "/Library/Logs"/*)
+      # /Library/Logs/<owner>/...
+      echo "$(echo "$p" | sed -E "s|^/Library/Logs/([^/]+).*|\\1|")"
+      ;;
+    "/var/log"/*)
+      echo "system"
+      ;;
+    *)
+      echo "unknown"
+      ;;
+  esac
+}
+
+_logs_is_user_level() {
+  # Purpose: decide whether a path is user-level (safe by default)
+  local p="$1"
+  case "$p" in
+    "$HOME/Library/Logs"/*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+_logs_rotations_summary() {
+  # Purpose: in explain mode, summarize rotated siblings for a log file
+  # Notes: best-effort; shows common rotation patterns next to the base file
+  local p="$1"
+  local dir
+  local base
+
+  dir="$(dirname "$p")"
+  base="$(basename "$p")"
+
+  # Skip if directory is unreadable
+  [[ -d "$dir" ]] || return 0
+
+  # Common rotations:
+  #   file.log.1
+  #   file.log.2
+  #   file.log.0.gz
+  #   file.log.1.gz
+  #   file.log.gz
+  # Also include *.old
+  local matches
+  matches=$(ls -1 "$dir" 2>/dev/null | grep -E "^${base}(\\.[0-9]+)?(\\.gz)?$|^${base}\\.old$" || true)
+  [[ -n "$matches" ]] || return 0
+
+  explain_log "  Rotated (same dir):"
+
+  # Print each match with size
+  echo "$matches" | while IFS= read -r f; do
+    [[ -n "$f" ]] || continue
+    local fp
+    fp="$dir/$f"
+    local kb
+    kb=$(du -sk "$fp" 2>/dev/null | awk '{print $1}' || echo "0")
+    local mb
+    mb=$((kb / 1024))
+    explain_log "    - ${mb}MB | ${f}"
+  done
+}
+
+_logs_confirm_move() {
+  # Purpose: confirm move for an item
+  # Behavior: use GUI prompt if available and not disabled, else terminal prompt
+  local p="$1"
+
+  if [[ "${NO_GUI:-false}" == "false" ]] && type ask_gui >/dev/null 2>&1; then
+    if ask_gui "$p"; then
+      return 0
+    fi
+    return 1
+  fi
+
+  # Terminal prompt fallback
+  printf "Move to backup? %s [y/N] " "$p"
+  read -r ans || true
+  case "$ans" in
+    y|Y|yes|YES)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+_logs_move_to_backup() {
+  # Purpose: move a path to backup safely (best-effort)
+  # Notes: relies on mv; may require sudo for system paths
+  local p="$1"
+  local backup_dir="$2"
+
+  mkdir -p "$backup_dir"
+
+  # Preserve basename; collisions are unlikely but possible, so add timestamp if needed
+  local base
+  base="$(basename "$p")"
+  local dest="$backup_dir/$base"
+
+  if [[ -e "$dest" ]]; then
+    dest="$backup_dir/${base}_$(date +%Y%m%d_%H%M%S)"
+  fi
+
+  if mv "$p" "$dest" 2>/dev/null; then
+    log "Moved $p to backup."
+    return 0
+  fi
+
+  # Retry with sudo for system paths
+  if type sudo >/dev/null 2>&1; then
+    explain_log "  move requires elevated permissions; retrying with sudo"
+    sudo mv "$p" "$dest"
+    log "Moved $p to backup."
+    return 0
+  fi
+
+  log "SKIP (permission denied): $p"
+  return 1
+}
+
+# ----------------------------
+# Entry point
+# ----------------------------
+run_logs_module() {
+  # Args:
+  #  $1 apply (true/false)
+  #  $2 backup dir
+  #  $3 explain (true/false)
+  #  $4 threshold MB (integer)
+  local apply="$1"
+  local backup_dir="$2"
+  local explain="$3"
+  local threshold_mb="$4"
+
+  EXPLAIN="$explain"
+
+  # Validate threshold
+  if [[ -z "$threshold_mb" ]]; then
+    threshold_mb="50"
+  fi
+
+  # Minimum sanity
+  if ! echo "$threshold_mb" | grep -Eq '^[0-9]+$'; then
+    log "Logs: invalid threshold MB: $threshold_mb (expected integer)"
+    return 1
+  fi
+
+  log "Logs: scanning log locations (min ${threshold_mb}MB)..."
+
+  # Locations
+  local locations
+  locations=(
+    "$HOME/Library/Logs"
+    "/Library/Logs"
+    "/var/log"
+  )
+
+  local tmp
+  tmp="$(tmpfile)"
+  : > "$tmp"
+
+  # Collect candidates: both files and directories.
+  # We keep the scan conservative and bounded:
+  # - For directories: compute du size of the directory itself
+  # - For files: du size of the file
+  local loc
+  for loc in "${locations[@]}"; do
+    [[ -e "$loc" ]] || continue
+
+    explain_log "Logs (explain): sizing $loc"
+
+    # Enumerate immediate children only to keep scan fast.
+    # Users can drill down with explain mode.
+    local child
+    for child in "$loc"/*; do
+      [[ -e "$child" ]] || continue
+
+      # Skip known protected/security patterns (best-effort)
+      case "$child" in
+        *bitdefender*|*malwarebytes*|*crowdstrike*|*sentinel*|*sophos*|*carbonblack*|*defender*|*endpoint*)
+          explain_log "Logs: SKIP (protected): $child"
+          continue
+          ;;
+      esac
+
+      # Size in KB
+      local kb
+      kb=$(du -sk "$child" 2>/dev/null | awk '{print $1}' || echo "0")
+      local mb
+      mb=$((kb / 1024))
+
+      if [[ "$mb" -lt "$threshold_mb" ]]; then
+        continue
+      fi
+
+      local mod
+      mod="$(_logs_mtime "$child")"
+
+      local owner
+      owner="$(_logs_owner_label "$child")"
+
+      # owner|mb|mod|path
+      printf "%s|%s|%s|%s\n" "$owner" "$mb" "$mod" "$child" >> "$tmp"
+    done
+  done
+
+  local found
+  found=$(wc -l < "$tmp" 2>/dev/null | tr -d ' ' || echo "0")
+
+  if [[ "$found" -eq 0 ]]; then
+    log "Logs: no large log items found (by threshold)."
+    return 0
+  fi
+
+  # Sort by owner then size desc
+  local sorted
+  sorted="$(tmpfile)"
+  sort -t '|' -k1,1 -k2,2nr "$tmp" > "$sorted" 2>/dev/null || cp "$tmp" "$sorted"
+
+  local total_mb=0
+  local current_owner=""
+
+  while IFS='|' read -r owner mb mod path; do
+    [[ -n "${path:-}" ]] || continue
+
+    total_mb=$((total_mb + mb))
+
+    if [[ "$owner" != "$current_owner" ]]; then
+      current_owner="$owner"
+      log "LOG GROUP: $owner"
+    fi
+
+    # Default output: one line per item
+    log "LOG? ${mb}MB | modified: ${mod} | path: ${path}"
+
+    # Explain output: rotations + reason
+    if [[ "${EXPLAIN:-false}" == "true" ]]; then
+      explain_log "  reason: >= ${threshold_mb}MB"
+
+      # For user-level Logs/<owner>, also show top subfolders for directories
+      if [[ -d "$path" ]]; then
+        explain_log "  Subfolders (top 3 by size):"
+        du -sk "$path"/* 2>/dev/null \
+          | sort -nr \
+          | head -n 3 \
+          | while read -r skb sub; do
+              local smb=$((skb / 1024))
+              explain_log "    - ${smb}MB | ${sub}"
+            done
+      else
+        _logs_rotations_summary "$path"
+      fi
+    fi
+
+    # Optional cleanup
+    if [[ "$apply" == "true" ]]; then
+      if _logs_is_user_level "$path"; then
+        if _logs_confirm_move "$path"; then
+          _logs_move_to_backup "$path" "$backup_dir"
+        else
+          explain_log "Logs: SKIP (user declined): $path"
+        fi
+      else
+        # System logs require explicit confirmation
+        log "Logs: system path detected (confirm carefully): $path"
+        if _logs_confirm_move "$path"; then
+          _logs_move_to_backup "$path" "$backup_dir"
+        else
+          explain_log "Logs: SKIP (user declined): $path"
+        fi
+      fi
+    fi
+
+  done < "$sorted"
+
+  log "Logs: total large log items (by threshold): ${total_mb}MB"
+
+  if [[ "$apply" != "true" ]]; then
+    log "Logs: run with --apply to relocate selected log items (user-confirmed, reversible)"
+  fi
+}

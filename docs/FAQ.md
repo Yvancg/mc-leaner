@@ -65,6 +65,48 @@ mc-leaner flags items for **review**, not removal. If you still use an app, keep
 
 ---
 
+## What does the Caches module actually do?
+
+The Caches module is **inspection-first**.
+
+It scans user-level cache locations and highlights **large cache directories** based on conservative size thresholds. For each cache group, it reports:
+
+- total size
+- last modification time
+- owning app (best-effort)
+- largest subfolders (with `--explain`)
+
+By default, nothing is moved or removed.
+
+If you use `--apply`, mc-leaner will:
+- prompt you per cache group
+- move selected caches to a backup folder
+- never delete anything
+
+This allows you to safely reclaim space without guessing.
+
+---
+
+## What does the Logs module do, and is it safe?
+
+The Logs module inspects **large log files and directories** (default threshold: 50MB).
+
+It scans:
+- `~/Library/Logs`
+- `/Library/Logs`
+- `/var/log`
+
+By default, it only reports:
+- size
+- last modified time
+- related log rotations
+- top subfolders for large directories
+
+With `--apply`, logs can be relocated to a backup folder **only after explicit confirmation**.
+
+No logs are ever deleted automatically.
+---
+
 ## Does mc-leaner work on Apple Silicon?
 
 Yes.
@@ -93,6 +135,18 @@ Possibly, but not at the expense of transparency.
 
 Any future UI would be a thin wrapper over the same visible logic. The CLI will remain the reference implementation.
 
+---
+
+## Why does mc-leaner show so much detail?
+
+Because context matters.
+
+Large caches and logs are not inherently bad. What matters is:
+- how large they are
+- whether they are still active
+- whether you can safely remove them
+
+mc-leaner provides enough information so *you* can decide, instead of guessing.
 ---
 
 ## Can I contribute a new cleanup idea?

@@ -5,26 +5,40 @@ All notable changes to this project are documented in this file.
 This project follows a pragmatic versioning scheme:
 
 - MAJOR.MINOR.PATCH
-- v1.0.x is bugfix-only
-- New features land in v1.1+
+- v1.0.x is maintenance and bugfix-only
+- New features land in minor releases (v1.1, v1.2, …)
 
 ---
 
-## v1.1.0 — Cache inspection module and reliability improvements
+## v1.2.0 — Log inspection module
 
 **Release date:** 2026-01-02
 
 ### Added
 
-- Launchd inspection module for LaunchAgents and LaunchDaemons
-- `/usr/local/bin` inspection module with conservative orphan heuristics
+- Log inspection module (inspection-first)
+  - Scans `~/Library/Logs`, `/Library/Logs`, and `/var/log`
+  - Flags log files and directories ≥ 50MB
+  - Groups related logs and rotations
+  - Reports size, last modified time, and owning subsystem (best-effort)
+  - `--explain` mode showing rotation siblings and top subfolders
+  - Optional cleanup via relocation only (user-confirmed, reversible)
+
+### Improved
+
+- Unified inspection output format across caches and logs
+- Explain-mode consistency across all modules
+
+## v1.1.0 — Cache inspection module
+
+**Release date:** 2026-01-02
+
+### Added
+
 - User-level cache inspection module (inspection-first)
   - Groups caches by owning app
   - Reports size and last modified time
   - `--explain` mode showing top subfolders by size
-- Intel-only executable reporting (`--mode report`)
-- `--explain` flag across modules to clarify decisions
-- Reversible backup mechanism (move-only, no deletions)
 
 ### Improved
 

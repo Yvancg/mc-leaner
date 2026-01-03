@@ -24,6 +24,7 @@ source "$ROOT_DIR/modules/launchd.sh"
 source "$ROOT_DIR/modules/bins_usr_local.sh"
 source "$ROOT_DIR/modules/intel.sh"
 source "$ROOT_DIR/modules/caches.sh"
+source "$ROOT_DIR/modules/logs.sh"
 
 
 # ----------------------------
@@ -114,6 +115,7 @@ case "$MODE" in
     run_launchd_module "scan" "false" "$BACKUP_DIR" "$known_apps_file"
     run_bins_module "scan" "false" "$BACKUP_DIR" "$brew_formulae_file"
     run_caches_module "scan" "false" "$BACKUP_DIR"
+    run_logs_module "false" "$BACKUP_DIR" "$EXPLAIN" "50"
     run_intel_report
     ;;
   clean)
@@ -126,6 +128,7 @@ case "$MODE" in
     run_launchd_module "clean" "true" "$BACKUP_DIR" "$known_apps_file"
     run_bins_module "clean" "true" "$BACKUP_DIR" "$brew_formulae_file"
     run_caches_module "clean" "true" "$BACKUP_DIR"
+    run_logs_module "true" "$BACKUP_DIR" "$EXPLAIN" "50"
     run_intel_report
     ;;
   report)
@@ -152,6 +155,13 @@ case "$MODE" in
       run_caches_module "scan" "false" "$BACKUP_DIR"
     else
       run_caches_module "clean" "true" "$BACKUP_DIR"
+    fi
+    ;;
+  logs-only)
+    if [[ "$APPLY" != "true" ]]; then
+      run_logs_module "false" "$BACKUP_DIR" "$EXPLAIN" "50"
+    else
+      run_logs_module "true" "$BACKUP_DIR" "$EXPLAIN" "50"
     fi
     ;;
   *)

@@ -8,7 +8,7 @@ Dates are intentionally omitted. Features ship when they meet the safety bar.
 
 ---
 
-## v1.x (current)
+## v1.0.x (maintenance)
 
 Focus: **launchd hygiene and visibility**
 
@@ -22,17 +22,37 @@ Status: **stable foundation**
 
 ---
 
-## v2.x (short term)
+## v1.1.0 (released)
 
-Focus: **inspection before cleanup**
+Focus: **inspection-first storage visibility**
 
-### Planned modules
+### Implemented modules
 
 #### Caches (inspection-first)
 
 - List large user-level cache directories
 - Show size, last modified, owning app
-- Optional cleanup, user-level only
+- Group by app with top subfolders
+- Explain mode for detailed inspection
+- Optional cleanup, user-level only, reversible
+
+---
+
+## v1.2.0 (current development)
+
+Focus: **inspection before cleanup**
+
+### Planned modules
+
+#### Logs (inspection-first)
+
+- Identify large or rapidly growing logs
+- Group related logs and rotations
+- Show size, last modified, owning subsystem
+- Explain mode for rotation context and subfolders
+- Optional cleanup via relocation only
+
+Focus: **inspection before cleanup**
 
 #### Homebrew hygiene
 
@@ -51,17 +71,11 @@ Focus: **inspection before cleanup**
 
 ---
 
-## v3.x (medium term)
+## v2.x (medium term)
 
 Focus: **system understanding, not removal**
 
 ### Planned modules
-
-#### Logs
-
-- Identify large or rapidly growing logs
-- Highlight misbehaving applications
-- Reporting only by default
 
 #### Permissions audit
 

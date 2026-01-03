@@ -76,9 +76,11 @@ Shared logic belongs in `lib/`, not duplicated across modules.
 
 1. Fork the repository
 2. Create a feature branch:
+
    ```bash
    git checkout -b feature/my-change
    ```
+
 3. Make your changes
 4. Ensure:
    - Shell scripts remain compatible with Bash 3.2
@@ -104,6 +106,7 @@ Shared logic belongs in `lib/`, not duplicated across modules.
 ## Review process
 
 Pull requests will be reviewed with a strong bias toward:
+
 - safety
 - explicitness
 - long-term maintainability
@@ -115,6 +118,7 @@ If a change increases risk without a clear, user-visible benefit, it will likely
 ## Reporting issues
 
 When opening an issue, include:
+
 - macOS version
 - Apple Silicon or Intel
 - command used

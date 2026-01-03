@@ -56,6 +56,7 @@ Rules:
 Use inline comments sparingly and only when logic is non-obvious.
 
 Good:
+
 ```bash
 # Skip active services to avoid breaking running processes
 if is_active_job "$label"; then
@@ -64,6 +65,7 @@ fi
 ```
 
 Avoid:
+
 ```bash
 # Check if label is active
 if is_active_job "$label"; then
@@ -76,6 +78,7 @@ fi
 ## Safety-critical comments
 
 Any logic that:
+
 - skips protected items
 - performs privilege escalation
 - moves system files

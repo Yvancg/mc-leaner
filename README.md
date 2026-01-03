@@ -1,6 +1,6 @@
 # mc-leaner
 
-![McLeaner Social Image](assets/logo/mcleaner-logo_Image.svg)
+![McLeaner Logo](assets/logo/mcleaner-logo_Image.svg)
 
 ![macOS](https://img.shields.io/badge/macOS-supported-brightgreen)
 ![Bash](https://img.shields.io/badge/bash-3.2%2B-blue)

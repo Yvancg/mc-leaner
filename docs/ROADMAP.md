@@ -29,17 +29,20 @@ Focus: **inspection before cleanup**
 ### Planned modules
 
 #### Caches (inspection-first)
+
 - List large user-level cache directories
 - Show size, last modified, owning app
 - Optional cleanup, user-level only
 
 #### Homebrew hygiene
+
 - Surface `brew doctor` issues
 - Detect unlinked or outdated kegs
 - Identify orphaned Homebrew services
 - Suggest commands, do not execute automatically
 
 #### App leftovers
+
 - Detect files left behind after app uninstall:
   - Application Support
   - Preferences
@@ -55,11 +58,13 @@ Focus: **system understanding, not removal**
 ### Planned modules
 
 #### Logs
+
 - Identify large or rapidly growing logs
 - Highlight misbehaving applications
 - Reporting only by default
 
 #### Permissions audit
+
 - Report apps with:
   - Full Disk Access
   - Accessibility

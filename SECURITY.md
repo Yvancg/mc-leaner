@@ -19,10 +19,12 @@ If you believe you have found a **security vulnerability** in mc-leaner, please 
 - Instead, contact the maintainer directly.
 
 **Preferred contact:**
-- Email: security@mc-leaner.dev  
+
+- Email: <dev@y-consulting.us>
   (or open a private GitHub security advisory if enabled)
 
 When reporting, please include:
+
 - macOS version
 - Apple Silicon or Intel
 - mc-leaner version or commit hash
@@ -34,6 +36,7 @@ When reporting, please include:
 ## What qualifies as a security issue
 
 Security issues may include:
+
 - Privilege escalation vulnerabilities
 - Unsafe use of `sudo`
 - Insecure file handling (symlink attacks, path traversal)
@@ -45,6 +48,7 @@ Security issues may include:
 ## What does NOT qualify as a security issue
 
 The following are **not** considered security vulnerabilities:
+
 - False positives in orphan detection
 - Disagreements about cleanup heuristics
 - User-approved removal of files
@@ -57,6 +61,7 @@ These should be reported as normal issues instead.
 ## Security design notes
 
 mc-leaner is designed to reduce risk by:
+
 - Never deleting files
 - Requiring explicit user approval for every action
 - Avoiding background services or persistent privileges

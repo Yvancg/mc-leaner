@@ -65,7 +65,7 @@ If you want to understand what is running on your system—and clean it safely�
 - Conservative and heuristic-based by design
 - Supports `--explain` flag to clarify detection logic
 
-### Cache inspection (user-level)
+### Cache inspection (v1.1.0)
 
 - Inspects large user-level cache directories only:
   - `~/Library/Caches/*`
@@ -118,7 +118,7 @@ CACHE? 476MB | modified: 2025-09-30 10:56:42 | owner: ms-playwright
 Caches: total large caches (by heuristics): 3356MB
 ```
 
-### Log inspection (inspection-first)
+### Log inspection (v1.2.0)
 
 - Inspects log files and directories exceeding a size threshold (default: 50MB)
 - Scans:
@@ -139,7 +139,7 @@ Caches: total large caches (by heuristics): 3356MB
   - user-confirmed per item
   - moves logs to backup (never deletes)
 
-### Homebrew hygiene (planned – v1.3.0)
+### Homebrew hygiene (v1.3.0)
 
 - Inspection-first diagnostics for Homebrew-managed systems
 - Intended checks:
@@ -252,7 +252,7 @@ Inspect and optionally relocate selected logs:
 bash mc-leaner.sh --mode logs-only --apply
 ```
 
-Inspect Homebrew state (planned):
+Inspect Homebrew state:
 
 ```bash
 bash mc-leaner.sh --mode brew-only
@@ -309,7 +309,7 @@ mc-leaner/
 │   ├── bins_usr_local.sh
 │   ├── intel.sh
 │   ├── caches.sh        # user-level cache inspection (implemented)
-│   ├── brew.sh          # Homebrew hygiene (planned)
+│   ├── brew.sh          # Homebrew hygiene (implemented)
 │   ├── leftovers.sh     # planned
 │   ├── logs.sh          # log inspection (implemented)
 │   └── permissions.sh   # planned
@@ -340,7 +340,6 @@ mc-leaner/
 
 Future modules focus on **visibility first, cleanup second**:
 
-- Homebrew hygiene and diagnostics
 - App uninstall leftovers
 - Privacy and permissions audit
 

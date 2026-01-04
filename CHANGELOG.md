@@ -9,24 +9,30 @@ This project follows a pragmatic versioning scheme:
 - New features land in minor releases (v1.1, v1.2, …)
 
 ---
-## v1.3.0 — Unreleased
+
+## v1.3.0 — Homebrew hygiene (inspection-only)
+
+**Release date:** 2026-01-04
 
 ### Added
+
 - Homebrew hygiene module (skeleton)
   - Initial `brew.sh` module scaffold
   - CLI wiring for `--mode brew-only`
   - Inspection-first design (no cleanup logic yet)
 
 ### Notes
+
 - This release is in progress.
 - Functionality is limited to structure and integration.
 - No user-facing cleanup actions are performed in this version.
 
 ## v1.2.0 — Log inspection module
 
-**Release date:** 2026-01-02
+**Release date:** 2026-01-03
 
 ### Added
+
 - Log inspection module (inspection-first)
   - Scans `~/Library/Logs`, `/Library/Logs`, and `/var/log`
   - Flags log files and directories ≥ 50MB
@@ -36,10 +42,12 @@ This project follows a pragmatic versioning scheme:
   - Optional cleanup via relocation only (user-confirmed, reversible)
 
 ### Improved
+
 - Unified inspection output format across caches and logs
 - Explain-mode consistency across all modules
 
 ### Fixed
+
 - Edge cases where rotated logs were double-counted
 - Inconsistent grouping of subsystem-owned log directories
 

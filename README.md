@@ -153,6 +153,25 @@ Caches: total large caches (by heuristics): 3356MB
 
 This module will focus on **understanding Homebrew state**, not blindly cleaning it.
 
+### App leftovers inspection (v1.4.0)
+
+- Inspects user-level support locations for leftover data from uninstalled apps
+- Scans locations including:
+  - `~/Library/Containers`
+  - `~/Library/Group Containers`
+  - `~/Library/Application Support`
+  - `~/Library/Preferences`
+  - `~/Library/Saved Application State`
+- Uses bundle-id matching against installed apps to avoid false positives
+- Skips Apple/system-owned containers and protected software
+- Applies a size threshold (default: 50MB) to reduce noise
+- Inspection-first by default (no moves)
+- Optional cleanup:
+  - requires `--apply`
+  - user-confirmed per item
+  - relocates folders to backup (never deletes)
+- Designed for reviewing old app remnants, not active application data
+
 ### Architecture reporting
 
 - Generates a report of **Intel-only executables** at:
@@ -234,6 +253,12 @@ Inspect and optionally relocate large user-level caches:
 bash mc-leaner.sh --mode caches-only --apply
 ```
 
+# inspect app leftovers (dry-run)
+bash mc-leaner.sh --mode leftovers-only
+
+# inspect and optionally relocate leftovers
+bash mc-leaner.sh --mode leftovers-only --apply
+
 Inspect large log files and directories (dry-run):
 
 ```bash
@@ -310,7 +335,7 @@ mc-leaner/
 │   ├── intel.sh
 │   ├── caches.sh        # user-level cache inspection (implemented)
 │   ├── brew.sh          # Homebrew hygiene (implemented)
-│   ├── leftovers.sh     # planned
+│   ├── leftovers.sh     # app leftovers inspection (implemented)
 │   ├── logs.sh          # log inspection (implemented)
 │   └── permissions.sh   # planned
 ├── lib/

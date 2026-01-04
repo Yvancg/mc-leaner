@@ -10,6 +10,35 @@ This project follows a pragmatic versioning scheme:
 
 ---
 
+## v1.4.0 — Leftovers inspection & cleanup menu
+
+**Release date:** 2026-01-05
+
+### Added
+
+- Leftovers inspection module (user-level support data)
+  - Scans Application Support, Containers, Group Containers, Preferences, and Saved Application State
+  - Flags orphaned app data based on bundle-id matching and installed app inventory
+  - Size threshold default: 50MB
+  - Interactive cleanup menu when running with `--apply`
+  - All moves are reversible via timestamped backup directories
+
+### Improved
+
+- Unified safe move contract across all modules (bins, launchd, caches, logs, brew, leftovers, intel)
+- Consistent end-of-run summary across all modes
+- Clear distinction between:
+  - user-declined actions
+  - non-interactive skips
+  - permission or filesystem failures
+- Explain-mode output now consistently reports skip reasons and decision paths
+
+### Fixed
+
+- Incorrect “user declined” messages when no prompt was shown
+- Silent failures when moving protected or permission-restricted paths
+- Bash 3.2 edge cases with unbound arrays under `set -u`
+
 ## v1.3.0 — Homebrew hygiene (inspection-only)
 
 **Release date:** 2026-01-04

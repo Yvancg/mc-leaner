@@ -46,6 +46,7 @@ However, macOS maintenance always carries risk if you remove things blindly. Thi
 - nothing is removed automatically
 - system-critical and security-related services are skipped
 - you can always restore from backup
+- protected system, Apple-owned, and security-related paths are automatically skipped
 
 If something behaves unexpectedly, restore the files and reboot.
 
@@ -107,6 +108,42 @@ By default, it reports:
 With `--apply`, logs can be moved to a backup folder **only after explicit confirmation**.
 
 No logs are ever deleted automatically.
+
+---
+
+## What does the App Leftovers module do?
+
+The App Leftovers module (introduced in v1.4.0) is **inspection-first**.
+
+It scans common user-level support locations such as:
+
+- `~/Library/Application Support`
+- `~/Library/Containers`
+- `~/Library/Group Containers`
+- `~/Library/Preferences`
+
+It identifies **candidate leftover folders** that:
+
+- exceed conservative size thresholds
+- are not owned by protected Apple or security components
+- do not match currently installed applications
+
+For each candidate, mc-leaner reports:
+
+- size
+- last modification time
+- inferred owner or bundle identifier
+- why the item was flagged or skipped
+
+By default, nothing is moved.
+
+With `--apply`, mc-leaner:
+
+- prompts you *per item*
+- moves approved folders to a backup location
+- never deletes anything
+
+All decisions are explicit and reversible.
 
 ---
 
@@ -190,3 +227,5 @@ mc-leaner only runs modules implied by the selected mode.
 The default scan mode runs all inspection modules but performs no destructive actions.
 
 Any file movement or cleanup requires explicit use of `--apply`.
+
+If mc-leaner is running in a non-interactive context and cannot prompt safely, it will **skip the action** and report the reason. No file is ever moved without an explicit confirmation.

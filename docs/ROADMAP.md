@@ -52,28 +52,49 @@ Focus: **inspection before cleanup**
 - Explain mode for rotation context and subfolders
 - Optional cleanup via relocation only
 
-#### App leftovers
-
-- Detect files left behind after app uninstall:
-  - Application Support
-  - Preferences
-  - Containers
-- Correlate with missing app bundles
-
 ---
 
-## v1.3.0 (current development)
+## v1.3.0 (released)
+
+Status: inspection-only Homebrew hygiene released
 
 Focus: **inspection before cleanup**
 
-### Planned modules
+### Implemented modules
 
-#### Homebrew hygiene (skeleton / inspection-only)
+#### Homebrew hygiene (inspection-only)
 
 - Surface `brew doctor` issues
 - Detect unlinked or outdated kegs
 - Identify orphaned Homebrew services
 - Suggest commands, do not execute automatically
+
+---
+
+## v1.4.0 (released)
+
+Focus: **safe app residue inspection**
+
+### Implemented modules
+
+#### App leftovers (inspection-first)
+
+- Detect app-related folders left behind after uninstall:
+  - Containers
+  - Group Containers
+  - Application Support
+  - Preferences
+  - Saved Application State
+- Correlate leftovers with installed app bundle IDs
+- Hard skip rules for:
+  - Apple / system-owned containers
+  - Security and endpoint software
+- Size threshold filtering (default 50MB)
+- Explain mode showing why each item is skipped or flagged
+- Optional relocation only:
+  - User-confirmed
+  - Reversible via backup directory
+  - Shared safe move + error reporting contract
 
 ---
 

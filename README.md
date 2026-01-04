@@ -253,10 +253,10 @@ Inspect and optionally relocate large user-level caches:
 bash mc-leaner.sh --mode caches-only --apply
 ```
 
-# inspect app leftovers (dry-run)
+**inspect app leftovers (dry-run)**
 bash mc-leaner.sh --mode leftovers-only
 
-# inspect and optionally relocate leftovers
+**inspect and optionally relocate leftovers**
 bash mc-leaner.sh --mode leftovers-only --apply
 
 Inspect large log files and directories (dry-run):

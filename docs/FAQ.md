@@ -80,6 +80,7 @@ It scans user-level cache locations and highlights **large cache directories** b
 By default, nothing is moved or removed.
 
 If you use `--apply`, mc-leaner will:
+
 - prompt you per cache group
 - move selected caches to a backup folder
 - never delete anything
@@ -198,11 +199,13 @@ Any future UI would be a thin wrapper over the same visible logic. The CLI will 
 Because context matters.
 
 Large caches and logs are not inherently bad. What matters is:
+
 - how large they are
 - whether they are still active
 - whether you can safely remove them
 
 mc-leaner provides enough information so *you* can decide, instead of guessing.
+
 ---
 
 ## Can I contribute a new cleanup idea?

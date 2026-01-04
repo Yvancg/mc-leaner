@@ -24,6 +24,29 @@ fi
 run_launchd_module() {
   local mode="$1" apply="$2" backup_dir="$3"
   local known_apps_file="$4"
+  local flagged_count=0
+  local flagged_items=()
+  local move_fail_count=0
+  local move_failures=()
+
+  # ----------------------------
+  # Summary: module end-of-run contract
+  # ----------------------------
+  _launchd_summary_emit() {
+    # Purpose: emit a concise end-of-run summary line for global reporting
+    # Safety: logging only; does not change behavior
+    local checked_plists="$1"
+
+    local msg="checked=${checked_plists} plists; flagged=${flagged_count}"
+    if [[ "${move_fail_count}" -gt 0 ]]; then
+      msg+="; move_failures=${move_fail_count}"
+    fi
+    if [[ "${mode}" == "clean" && "${apply}" == "true" ]]; then
+      msg+="; apply=enabled (per-item confirm)"
+    fi
+
+    summary_add "Launchd" "$msg"
+  }
 
   # ----------------------------
   # Helper: resolve launchd program path from a plist
@@ -144,6 +167,8 @@ run_launchd_module() {
       if ! _launchd_program_exists "$prog"; then
         orphan_found=1
         log "ORPHAN (missing program): $plist_path (label: $label, program: $prog)"
+        flagged_count=$((flagged_count + 1))
+        flagged_items+=("label: ${label} | program: ${prog} | plist: ${plist_path}")
       else
         explain_log "OK (program exists): $plist_path (label: $label, program: $prog)"
         continue
@@ -153,8 +178,16 @@ run_launchd_module() {
       # SAFETY: only move items when explicitly running in clean mode with --apply
       if [[ "$mode" == "clean" && "$apply" == "true" ]]; then
         if ask_yes_no "Orphaned launch item detected:\n$plist_path\n\nMove to backup folder?"; then
-          safe_move "$plist_path" "$backup_dir"
-          log "Moved: $plist_path"
+          # Move contract: safe_move prints the final destination path on success.
+          # On failure, it returns non-zero and prints a short diagnostic.
+          local move_out
+          if move_out="$(safe_move "$plist_path" "$backup_dir" 2>&1)"; then
+            log "Moved: $plist_path -> $move_out"
+          else
+            move_fail_count=$((move_fail_count + 1))
+            move_failures+=("$plist_path | failed: $move_out")
+            log "Launchd: move failed: $plist_path | $move_out"
+          fi
         fi
       fi
     done
@@ -162,8 +195,33 @@ run_launchd_module() {
 
   if [[ "$orphan_found" -eq 0 ]]; then
     log "Launchd: no orphaned plists found (by heuristics)."
+    explain_log "Launchd: checked ${checked} plists."
+    _launchd_summary_emit "${checked}"
+    return 0
   fi
+
+  log "Launchd: flagged ${flagged_count} orphaned plist(s)."
+  log "Launchd: flagged items:"
+  for item in "${flagged_items[@]}"; do
+    log "  - ${item}"
+  done
+
+  if [[ "$move_fail_count" -gt 0 ]]; then
+    log "Launchd: move failures:"
+    for f in "${move_failures[@]}"; do
+      log "  - ${f}"
+    done
+  fi
+
+  if [[ "$mode" == "clean" && "$apply" == "true" ]]; then
+    log "Launchd: apply mode enabled; items may have been moved only after per-item confirmation."
+  else
+    log "Launchd: run with --mode clean --apply to move selected items (user-confirmed, reversible)."
+  fi
+
   explain_log "Launchd: checked ${checked} plists."
+
+  _launchd_summary_emit "${checked}"
 }
 
 # End of module

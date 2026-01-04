@@ -21,12 +21,6 @@ This project follows a pragmatic versioning scheme:
   - CLI wiring for `--mode brew-only`
   - Inspection-first design (no cleanup logic yet)
 
-### Notes
-
-- This release is in progress.
-- Functionality is limited to structure and integration.
-- No user-facing cleanup actions are performed in this version.
-
 ## v1.2.0 — Log inspection module
 
 **Release date:** 2026-01-03

@@ -160,6 +160,9 @@ run_caches_module() {
   # Report / optional relocation (grouped)
   # ----------------------------
   local report_file
+  local flagged_count=0
+  local flagged_items=()
+  local move_failures=()
   report_file="$(tmpfile)"
 
   for d in "${candidates[@]}"; do
@@ -195,6 +198,8 @@ run_caches_module() {
     overall_total_mb=$((overall_total_mb + mb))
 
     log "CACHE? ${mb}MB | modified: ${mod} | owner: ${owner} | path: ${path}"
+    flagged_count=$((flagged_count + 1))
+    flagged_items+=("${mb}MB | modified: ${mod} | owner: ${owner} | path: ${path}")
 
     # Explain-only: show top subfolders by size (up to 3)
     if [[ "${EXPLAIN:-false}" == "true" ]]; then
@@ -216,8 +221,15 @@ run_caches_module() {
       fi
 
       if ask_yes_no "Large cache detected:\n${path}\n\nMove to backup (reversible)?"; then
-        safe_move_path "$path" "$backup_dir"
-        log "Moved: $path"
+        local move_out
+        if move_out="$(safe_move "$path" "$backup_dir" 2>&1)"; then
+          # Contract: log both source and resolved destination for legibility.
+          log "Moved: $path -> $move_out"
+        else
+          # Contract: keep the item flagged, but surface a clear move failure summary at end-of-run.
+          move_failures+=("$path | failed: $move_out")
+          log "Caches: move failed: $path"
+        fi
       fi
     fi
   done <"${report_file}.sorted"
@@ -229,7 +241,33 @@ run_caches_module() {
 
   log "Caches: total large caches (by heuristics): ${overall_total_mb}MB"
   log "Caches: scanned ${scanned_dirs} directories; listed ${over_threshold} >= ${min_mb}MB."
-  explain_log "Caches: run with --apply to relocate selected caches (user-confirmed, reversible)"
+  log "Caches: flagged ${flagged_count} item(s) >= ${min_mb}MB."
+  log "Caches: flagged items:"
+  for item in "${flagged_items[@]}"; do
+    log "  - ${item}"
+  done
+
+  if [[ "${#move_failures[@]}" -gt 0 ]]; then
+    log "Caches: move failures:"
+    for f in "${move_failures[@]}"; do
+      log "  - ${f}"
+    done
+  fi
+
+  log "Caches: run with --apply to relocate selected caches (user-confirmed, reversible)"
+
+  if [[ "${EXPLAIN:-false}" == "true" ]]; then
+    explain_log "Caches (explain): flagged items are listed above for review."
+  fi
+
+  # ----------------------------
+  # Module summary (global footer aggregation)
+  # ----------------------------
+  summary_add "Caches" \
+    "scanned=${scanned_dirs}" \
+    "flagged=${flagged_count}" \
+    "total_mb=${overall_total_mb}" \
+    "moved=$( [[ \"$mode\" == \"clean\" && \"$apply\" == \"true\" ]] && echo yes || echo no )"
 }
 
 # End of module

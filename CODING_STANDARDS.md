@@ -127,3 +127,40 @@ Comments are part of the safety surface.
 If a future contributor removes or alters safety logic, the comment explaining that logic must be updated as well.
 
 Code without intent documentation is considered unsafe.
+
+## Module Output Contract
+
+Every module in mc-leaner must follow the same observable execution contract.
+
+This contract is part of the tool’s safety and usability guarantees.
+
+### Required phases
+
+Each module must execute and log output in the following order:
+
+1. **Inputs**
+   - Clearly log what is being scanned (paths, scope, thresholds).
+   - In `--explain` mode, explicitly state assumptions and limits.
+
+2. **Inspection**
+   - Perform read-only analysis by default.
+   - No filesystem mutations unless `--apply` is explicitly set.
+
+3. **Inline reasoning**
+   - While scanning, log why items are:
+     - flagged
+     - skipped
+     - protected
+   - Reasons must be human-readable and deterministic.
+
+4. **End-of-run summary**
+   - At the end of the module, print a consolidated summary of:
+     - all flagged items that may require user action
+     - totals and counts (even if zero)
+   - If no items are flagged, this must be stated explicitly.
+
+### Enforcement
+
+- Missing an end-of-run summary is a **bug**.
+- Logging findings only inline without summarizing them at the end is not acceptable.
+- Modules that do not follow this contract must be fixed before release.

@@ -132,36 +132,29 @@ _logs_confirm_move() {
 
 _logs_move_to_backup() {
   # Purpose: move a path to backup safely (best-effort)
-  # Notes: relies on mv; may require sudo for system paths
+  # Notes: uses safe_move from fs.sh; contract: see shared move/error contract
   local p="$1"
   local backup_dir="$2"
 
+  # Defensive: require shared move helper
+  if ! type safe_move >/dev/null 2>&1; then
+    log "Logs: SKIP (move helper missing): $p"
+    return 1
+  fi
+
   mkdir -p "$backup_dir"
 
-  # Preserve basename; collisions are unlikely but possible, so add timestamp if needed
-  local base
-  base="$(basename "$p")"
-  local dest="$backup_dir/$base"
+  # safe_move is the source of truth for destination selection and errors
+  local out
+  out="$(safe_move "$p" "$backup_dir" 2>&1)" || {
+    # IMPORTANT: do not log here; caller aggregates failures
+    printf '%s\n' "$out"
+    return 1
+  }
 
-  if [[ -e "$dest" ]]; then
-    dest="$backup_dir/${base}_$(date +%Y%m%d_%H%M%S)"
-  fi
-
-  if mv "$p" "$dest" 2>/dev/null; then
-    log "Moved $p to backup."
-    return 0
-  fi
-
-  # Retry with sudo for system paths
-  if type sudo >/dev/null 2>&1; then
-    explain_log "  move requires elevated permissions; retrying with sudo"
-    sudo mv "$p" "$dest"
-    log "Moved $p to backup."
-    return 0
-  fi
-
-  log "SKIP (permission denied): $p"
-  return 1
+  # On success, safe_move returns the destination path on stdout
+  log "Moved: $p -> $out"
+  return 0
 }
 
 # ----------------------------
@@ -179,6 +172,10 @@ run_logs_module() {
   local threshold_mb="$4"
 
   EXPLAIN="$explain"
+
+  # End-of-run contract arrays
+  local -a flagged_items=()
+  local -a move_failures=()
 
   # Validate threshold
   if [[ -z "$threshold_mb" ]]; then
@@ -278,6 +275,8 @@ run_logs_module() {
 
     # Default output: one line per item
     log "LOG? ${mb}MB | modified: ${mod} | path: ${path}"
+    # End-of-run summary: aggregate flagged items
+    flagged_items+=("${mb}MB | modified: ${mod} | owner: ${owner} | ${path}")
 
     # Explain output: rotations + reason
     if [[ "${EXPLAIN:-false}" == "true" ]]; then
@@ -302,7 +301,12 @@ run_logs_module() {
     if [[ "$apply" == "true" ]]; then
       if _logs_is_user_level "$path"; then
         if _logs_confirm_move "$path"; then
-          _logs_move_to_backup "$path" "$backup_dir"
+          # Use move contract: capture output and status
+          local move_out=""
+          if ! move_out="$(_logs_move_to_backup "$path" "$backup_dir")"; then
+            move_failures+=("${path} | ${move_out}")
+            log "Logs: move failed: ${path} | ${move_out}"
+          fi
         else
           explain_log "Logs: SKIP (user declined): $path"
         fi
@@ -310,7 +314,11 @@ run_logs_module() {
         # System logs require explicit confirmation
         log "Logs: system path detected (confirm carefully): $path"
         if _logs_confirm_move "$path"; then
-          _logs_move_to_backup "$path" "$backup_dir"
+          local move_out=""
+          if ! move_out="$(_logs_move_to_backup "$path" "$backup_dir")"; then
+            move_failures+=("${path} | ${move_out}")
+            log "Logs: move failed: ${path} | ${move_out}"
+          fi
         else
           explain_log "Logs: SKIP (user declined): $path"
         fi
@@ -319,7 +327,29 @@ run_logs_module() {
 
   done < "$sorted"
 
+  # End-of-run summary contract
+  log "Logs: flagged ${#flagged_items[@]} item(s)."
+  log "Logs: flagged items:"
+  if [[ "${#flagged_items[@]}" -gt 0 ]]; then
+    for item in "${flagged_items[@]}"; do
+      log "  - ${item}"
+    done
+  fi
+  if [[ "${#move_failures[@]}" -gt 0 ]]; then
+    log "Logs: move failures:"
+    for failure in "${move_failures[@]}"; do
+      log "  - ${failure}"
+    done
+  fi
+
   log "Logs: total large log items (by threshold): ${total_mb}MB"
+
+  # ----------------------------
+  # Global summary contribution
+  # ----------------------------
+  if type summary_add >/dev/null 2>&1; then
+    summary_add "logs" "${#flagged_items[@]}" "${total_mb}MB" "${#move_failures[@]}"
+  fi
 
   if [[ "$apply" != "true" ]]; then
     log "Logs: run with --apply to relocate selected log items (user-confirmed, reversible)"

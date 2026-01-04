@@ -4,7 +4,18 @@
 # Safety: read-only; does NOT run brew cleanup/uninstall/upgrade; no filesystem writes
 # Notes: best-effort parsing; macOS default bash 3.2 compatible
 
+
 set -euo pipefail
+
+# ----------------------------
+# Summary buckets (printed at end)
+# ----------------------------
+BREW_LEAVES_LIST=()
+BREW_OUTDATED_UNPINNED=()
+BREW_OUTDATED_PINNED=()
+BREW_TOP_SIZES=()          # entries like: "name|mb|versions"
+BREW_CACHE_LINES=()        # human-readable cache summary lines
+BREW_FLAGGED_ITEMS=()      # actionable review items (end-of-run)
 
 # ----------------------------
 # Defensive: ensure explain_log exists
@@ -22,6 +33,42 @@ fi
 # ----------------------------
 # Helpers
 # ----------------------------
+
+_brew_array_len() {
+  # Purpose: safe array length under `set -u` (returns 0 if unset)
+  # Inputs: variable name
+  local name="$1"
+
+  # `declare -a foo` (without assignment) makes `declare -p foo` succeed even though
+  # expanding `${foo[@]}` still errors under `set -u`. So we must check "is set" too.
+  if declare -p "$name" >/dev/null 2>&1; then
+    if eval '[[ ${'"$name"'[@]+x} ]]'; then
+      eval "echo \${#$name[@]}"
+    else
+      echo 0
+    fi
+  else
+    echo 0
+  fi
+}
+
+_brew_array_copy() {
+  # Purpose: copy array values safely under `set -u`
+  # Inputs: src var name, dest var name
+  local src="$1"
+  local dest="$2"
+
+  # Same nuance as `_brew_array_len`: declared-but-unset arrays must be treated as empty.
+  if declare -p "$src" >/dev/null 2>&1; then
+    if eval '[[ ${'"$src"'[@]+x} ]]'; then
+      eval "$dest=(\"\${$src[@]}\")"
+    else
+      eval "$dest=()"
+    fi
+  else
+    eval "$dest=()"
+  fi
+}
 _brew_exists() {
   # Purpose: check whether Homebrew is installed
   command -v brew >/dev/null 2>&1
@@ -153,7 +200,7 @@ _brew_top_n_largest_formulae() {
     versions=$(echo "$versions" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g' | sed -E 's/[[:space:]]+$//')
 
     log "BREW SIZE: ${f} | ${mb}MB | versions: ${versions:-unknown}"
-
+    BREW_TOP_SIZES+=("${f}|${mb}|${versions:-unknown}")
     if [[ "${EXPLAIN:-false}" == "true" ]]; then
       explain_log "  source: Cellar size (best-effort)"
     fi
@@ -171,6 +218,7 @@ _brew_cache_downloads_summary() {
   local root_mb
   root_mb="$(_brew_dir_mb "$cache_root")"
   log "BREW CACHE: Homebrew | ${root_mb}MB | path: ${cache_root}"
+  BREW_CACHE_LINES+=("BREW CACHE: Homebrew | ${root_mb}MB | path: ${cache_root}")
 
   if [[ "${EXPLAIN:-false}" == "true" ]]; then
     # Top 3 subfolders by size (best-effort)
@@ -208,8 +256,10 @@ _brew_cache_downloads_summary() {
     local oldest_h
     oldest_h=$(date -r "$oldest" "+%Y-%m-%d %H:%M:%S" 2>/dev/null || echo "unknown")
     log "BREW CACHE: downloads | ${total_mb}MB | files: ${count} | oldest: ${oldest_h}"
+    BREW_CACHE_LINES+=("BREW CACHE: downloads | ${total_mb}MB | files: ${count} | oldest: ${oldest_h}")
   else
     log "BREW CACHE: downloads | ${total_mb}MB | files: ${count}"
+    BREW_CACHE_LINES+=("BREW CACHE: downloads | ${total_mb}MB | files: ${count}")
   fi
 }
 
@@ -226,6 +276,17 @@ run_brew_module() {
   local explain="$3"
 
   EXPLAIN="$explain"
+
+  # Defensive: make sure summary arrays exist even if this file is sourced in an unexpected order
+  declare -a BREW_LEAVES_LIST BREW_OUTDATED_UNPINNED BREW_OUTDATED_PINNED BREW_TOP_SIZES BREW_CACHE_LINES BREW_FLAGGED_ITEMS
+
+  # Reset summary buckets per run
+  BREW_LEAVES_LIST=()
+  BREW_OUTDATED_UNPINNED=()
+  BREW_OUTDATED_PINNED=()
+  BREW_TOP_SIZES=()
+  BREW_CACHE_LINES=()
+  BREW_FLAGGED_ITEMS=()
 
   if ! _brew_exists; then
     log "Homebrew not found, skipping brew hygiene."
@@ -256,12 +317,14 @@ run_brew_module() {
     if [[ "${EXPLAIN:-false}" == "true" ]]; then
       explain_log "  note: leaves may still be actively used (explicit installs)."
     fi
-    echo "$leaves" | awk 'NF' | while IFS= read -r f; do
+    while IFS= read -r f; do
+      [[ -n "$f" ]] || continue
+      BREW_LEAVES_LIST+=("$f")
       log "  ${f}"
       if [[ "${EXPLAIN:-false}" == "true" ]]; then
         explain_log "    reason: brew leaves (no other formula depends on it)"
       fi
-    done
+    done <<< "$(echo "$leaves" | awk 'NF')"
   else
     log "BREW LEAVES (not depended on by other formulae): none"
   fi
@@ -290,8 +353,11 @@ run_brew_module() {
       name="$(echo "$line" | awk '{print $1}')"
       if echo "$pinned_lookup" | grep -q $'\n'"$name"$'\n'; then
         outdated_pinned="${outdated_pinned}${line}"$'\n'
+        BREW_OUTDATED_PINNED+=("$name")
       else
         outdated_unpinned="${outdated_unpinned}${line}"$'\n'
+        BREW_OUTDATED_UNPINNED+=("$name")
+        BREW_FLAGGED_ITEMS+=("outdated:${name}")
       fi
     done <<< "$outdated_f"
   fi
@@ -332,5 +398,94 @@ run_brew_module() {
   _brew_cache_downloads_summary
 
   log "Homebrew: inspection complete."
+
+  # ----------------------------
+  # Summary (actionable items at end)
+  # ----------------------------
+  log "Homebrew: flagged items:"
+  local flags_len
+  flags_len="$(_brew_array_len BREW_FLAGGED_ITEMS)"
+  if [[ "$flags_len" -gt 0 ]]; then
+    for item in "${BREW_FLAGGED_ITEMS[@]}"; do
+      log "  - ${item}"
+    done
+  else
+    log "  none"
+  fi
+
+  log "BREW SUMMARY (review list):"
+
+  if (( ${#BREW_OUTDATED_UNPINNED[@]} > 0 )); then
+    log "  Outdated (unpinned):"
+    for f in "${BREW_OUTDATED_UNPINNED[@]}"; do
+      log "    - ${f}"
+    done
+  else
+    log "  Outdated (unpinned): none"
+  fi
+
+  if (( ${#BREW_OUTDATED_PINNED[@]} > 0 )); then
+    log "  Outdated but pinned:"
+    for f in "${BREW_OUTDATED_PINNED[@]}"; do
+      log "    - ${f}"
+    done
+  else
+    log "  Outdated but pinned: none"
+  fi
+
+  if (( ${#BREW_TOP_SIZES[@]} > 0 )); then
+    log "  Largest formulae (top 10 by Cellar size):"
+    for entry in "${BREW_TOP_SIZES[@]}"; do
+      local name
+      local rest
+      local mb
+      local ver
+      name="${entry%%|*}"
+      rest="${entry#*|}"
+      mb="${rest%%|*}"
+      ver="${rest#*|}"
+      log "    - ${name}: ${mb}MB (versions: ${ver})"
+    done
+  else
+    log "  Largest formulae: none"
+  fi
+
+  if (( ${#BREW_CACHE_LINES[@]} > 0 )); then
+    log "  Cache highlights:"
+    for line in "${BREW_CACHE_LINES[@]}"; do
+      log "    - ${line#BREW CACHE: }"
+    done
+  else
+    log "  Cache highlights: none"
+  fi
+
+  if (( ${#BREW_LEAVES_LIST[@]} > 0 )); then
+    log "  Leaves (informational, not necessarily unused):"
+    for f in "${BREW_LEAVES_LIST[@]}"; do
+      log "    - ${f}"
+    done
+  else
+    log "  Leaves: none"
+  fi
+
   log "Homebrew: v1.3.0 is read-only. No cleanup actions are performed."
+
+  # ----------------------------
+  # Global summary hook
+  # ----------------------------
+  # Note: under `set -u`, expanding an unset array errors. Defensive-copy to a local array.
+  local -a _brew_flags
+  _brew_array_copy BREW_FLAGGED_ITEMS _brew_flags
+
+  local brew_flags_len
+  brew_flags_len="$(_brew_array_len _brew_flags)"
+
+  if [[ "$brew_flags_len" -gt 0 ]]; then
+    summary_add "brew" \
+      "formulae=${n_formulae}, casks=${n_casks}, outdated_unpinned=${#BREW_OUTDATED_UNPINNED[@]}, leaves=${#BREW_LEAVES_LIST[@]}" \
+      "${_brew_flags[@]}"
+  else
+    summary_add "brew" \
+      "formulae=${n_formulae}, casks=${n_casks}, outdated_unpinned=${#BREW_OUTDATED_UNPINNED[@]}, leaves=${#BREW_LEAVES_LIST[@]}"
+  fi
 }

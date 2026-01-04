@@ -320,7 +320,7 @@ mc-leaner/
 │   ├── safety.sh
 │   └── utils.sh
 ├── config/
-│   ├── protected-labels.conf   # security & never-touch rules
+│   ├── protected-labels.conf   # security & never-touch rules (future)
 │   └── modes.conf              # mode → module mapping (future)
 ├── docs/
 │   ├── FAQ.md

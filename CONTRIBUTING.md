@@ -8,6 +8,12 @@ This project prioritizes **safety, clarity, and reversibility** over feature vel
 
 ## Core principles (non-negotiable)
 
+These principles define the functional contract of mc-leaner.
+
+Any change that violates them is considered a **bug**, not a stylistic disagreement.
+Violations must be treated as functional regressions and fixed accordingly.
+Pull requests that break these principles will be rejected or reverted.
+
 All contributions must respect these principles:
 
 1. **Safe by default**

@@ -26,6 +26,9 @@ run_bins_module() {
   # Heuristic scan
   # ----------------------------
   local found=0
+  local flagged_count=0
+  local flagged_items=()
+  local move_failures=()
   log "Checking $dir for orphaned binaries (heuristic)..."
   for bin_path in "$dir"/*; do
     [[ -x "$bin_path" ]] || continue
@@ -86,18 +89,57 @@ run_bins_module() {
 
     found=1
     log "ORPHAN? $bin_path"
+    flagged_count=$((flagged_count + 1))
+    flagged_items+=("${bin_path}")
 
     # SAFETY: only move items when explicitly running in clean mode with --apply
     if [[ "$mode" == "clean" && "$apply" == "true" ]]; then
       if ask_yes_no "Orphaned binary detected:\n$bin_path\n\nMove to backup folder?"; then
-        safe_move "$bin_path" "$backup_dir"
-        log "Moved: $bin_path"
+        local move_out=""
+        if ! move_out="$(safe_move "$bin_path" "$backup_dir" 2>&1)"; then
+          move_failures+=("$bin_path|$move_out")
+          log "Move failed: $bin_path"
+        else
+          log "Moved: $bin_path -> $move_out"
+        fi
       fi
     fi
   done
 
   if [[ "$found" -eq 0 ]]; then
     log "No orphaned /usr/local/bin items found (by heuristics)."
+    return 0
+  fi
+
+  log "Bins: flagged ${flagged_count} item(s) in ${dir}."
+  log "Bins: flagged items:"
+  for item in "${flagged_items[@]}"; do
+    log "  - ${item}"
+  done
+
+  if [[ "$mode" == "clean" && "$apply" == "true" ]]; then
+    log "Bins: apply mode enabled; items may have been moved only after per-item confirmation."
+  else
+    log "Bins: run with --mode clean --apply to move selected items (user-confirmed, reversible)."
+  fi
+
+  if [[ ${#move_failures[@]} -gt 0 ]]; then
+    log "Bins: move failures:"
+    local mf
+    for mf in "${move_failures[@]}"; do
+      local src="${mf%%|*}"
+      local err="${mf#*|}"
+      log "  - ${src} | failed(permission): ${err}"
+    done
+  fi
+
+  # ----------------------------
+  # Summary
+  # ----------------------------
+  if [[ "$found" -eq 1 ]]; then
+    summary_add "bins" "flagged=${flagged_count}"
+  else
+    summary_add "bins" "flagged=0"
   fi
 }
 

@@ -108,6 +108,11 @@ _logs_rotations_summary() {
 _logs_confirm_move() {
   # Purpose: confirm move for an item
   # Behavior: use GUI prompt if available and not disabled, else terminal prompt
+  # Safety: never assumes an answer in non-interactive contexts
+  # Returns:
+  #   0 = confirmed (yes)
+  #   1 = declined (explicit no / anything else)
+  #   2 = could not prompt (non-interactive / no tty)
   local p="$1"
 
   if [[ "${NO_GUI:-false}" == "false" ]] && type ask_gui >/dev/null 2>&1; then
@@ -118,8 +123,32 @@ _logs_confirm_move() {
   fi
 
   # Terminal prompt fallback
-  printf "Move to backup? %s [y/N] " "$p"
-  read -r ans || true
+  # IMPORTANT: stdin may not be a TTY even when invoked from a terminal (wrappers, redirects).
+  # Prefer /dev/tty when available so prompts still work.
+  local prompt_in=""
+  if [[ -r /dev/tty ]]; then
+    prompt_in="/dev/tty"
+  elif [[ -t 0 ]]; then
+    prompt_in="/dev/stdin"
+  else
+    explain_log "Logs: SKIP (non-interactive; cannot prompt): $p"
+    return 2
+  fi
+
+  # Write the prompt to the controlling terminal when possible
+  if [[ -w /dev/tty ]]; then
+    printf "Move to backup? %s [y/N] " "$p" > /dev/tty
+  else
+    printf "Move to backup? %s [y/N] " "$p"
+  fi
+
+  local ans=""
+  if ! IFS= read -r ans < "$prompt_in"; then
+    # No input received (EOF). Treat as non-response.
+    explain_log "Logs: SKIP (no input; prompt cancelled): $p"
+    return 2
+  fi
+
   case "$ans" in
     y|Y|yes|YES)
       return 0
@@ -308,7 +337,12 @@ run_logs_module() {
             log "Logs: move failed: ${path} | ${move_out}"
           fi
         else
-          explain_log "Logs: SKIP (user declined): $path"
+          local rc=$?
+          if [[ "$rc" -eq 2 ]]; then
+            explain_log "Logs: SKIP (non-interactive; cannot prompt): $path"
+          else
+            explain_log "Logs: SKIP (user declined): $path"
+          fi
         fi
       else
         # System logs require explicit confirmation
@@ -320,7 +354,12 @@ run_logs_module() {
             log "Logs: move failed: ${path} | ${move_out}"
           fi
         else
-          explain_log "Logs: SKIP (user declined): $path"
+          local rc=$?
+          if [[ "$rc" -eq 2 ]]; then
+            explain_log "Logs: SKIP (non-interactive; cannot prompt): $path"
+          else
+            explain_log "Logs: SKIP (user declined): $path"
+          fi
         fi
       fi
     fi

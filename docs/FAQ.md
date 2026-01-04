@@ -89,22 +89,41 @@ This allows you to safely reclaim space without guessing.
 
 ## What does the Logs module do, and is it safe?
 
-The Logs module inspects **large log files and directories** (default threshold: 50MB).
+The Logs module is **inspection-first**.
 
-It scans:
+It scans key system and user log locations:
+
 - `~/Library/Logs`
 - `/Library/Logs`
 - `/var/log`
 
-By default, it only reports:
+By default, it reports:
+
 - size
 - last modified time
 - related log rotations
 - top subfolders for large directories
 
-With `--apply`, logs can be relocated to a backup folder **only after explicit confirmation**.
+With `--apply`, logs can be moved to a backup folder **only after explicit confirmation**.
 
 No logs are ever deleted automatically.
+
+---
+
+## What is the Homebrew hygiene module?
+
+The Homebrew module (introduced in v1.3.0) is **inspection-only** in its initial form.
+
+It focuses on:
+
+- identifying unused formulae and casks
+- highlighting large Homebrew cache and download artifacts
+- detecting stale or orphaned Homebrew-managed files
+
+There is no automatic cleanup or uninstall actions.
+
+All output is informational unless future versions explicitly add safe, confirmed actions.
+
 ---
 
 ## Does mc-leaner work on Apple Silicon?
@@ -161,3 +180,13 @@ Before proposing a feature, ask:
 4. Why should this live in mc-leaner?
 
 See CONTRIBUTING.md for details.
+
+---
+
+## Does mc-leaner run things I did not ask for?
+
+mc-leaner only runs modules implied by the selected mode.
+
+The default scan mode runs all inspection modules but performs no destructive actions.
+
+Any file movement or cleanup requires explicit use of `--apply`.

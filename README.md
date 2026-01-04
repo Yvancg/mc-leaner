@@ -139,6 +139,20 @@ Caches: total large caches (by heuristics): 3356MB
   - user-confirmed per item
   - moves logs to backup (never deletes)
 
+### Homebrew hygiene (planned – v1.3.0)
+
+- Inspection-first diagnostics for Homebrew-managed systems
+- Intended checks:
+  - orphaned formulae and casks
+  - unused dependencies
+  - outdated or disabled services
+  - stale cache and download artifacts
+- Read-only by default
+- No `brew cleanup`, `brew autoremove`, or destructive commands
+- Designed to explain *why* Homebrew reports certain states before suggesting actions
+
+This module will focus on **understanding Homebrew state**, not blindly cleaning it.
+
 ### Architecture reporting
 
 - Generates a report of **Intel-only executables** at:
@@ -238,6 +252,12 @@ Inspect and optionally relocate selected logs:
 bash mc-leaner.sh --mode logs-only --apply
 ```
 
+Inspect Homebrew state (planned):
+
+```bash
+bash mc-leaner.sh --mode brew-only
+```
+
 Run a specific module:
 
 ```bash
@@ -289,7 +309,7 @@ mc-leaner/
 │   ├── bins_usr_local.sh
 │   ├── intel.sh
 │   ├── caches.sh        # user-level cache inspection (implemented)
-│   ├── brew.sh          # planned
+│   ├── brew.sh          # Homebrew hygiene (planned)
 │   ├── leftovers.sh     # planned
 │   ├── logs.sh          # log inspection (implemented)
 │   └── permissions.sh   # planned

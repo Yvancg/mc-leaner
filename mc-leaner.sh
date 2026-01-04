@@ -25,6 +25,7 @@ source "$ROOT_DIR/modules/bins_usr_local.sh"
 source "$ROOT_DIR/modules/intel.sh"
 source "$ROOT_DIR/modules/caches.sh"
 source "$ROOT_DIR/modules/logs.sh"
+source "$ROOT_DIR/modules/brew.sh"
 
 
 # ----------------------------
@@ -112,6 +113,7 @@ case "$MODE" in
   scan)
     ensure_known_apps
     ensure_brew_formulae
+    run_brew_module "false" "$BACKUP_DIR" "$EXPLAIN"
     run_launchd_module "scan" "false" "$BACKUP_DIR" "$known_apps_file"
     run_bins_module "scan" "false" "$BACKUP_DIR" "$brew_formulae_file"
     run_caches_module "scan" "false" "$BACKUP_DIR"
@@ -163,6 +165,9 @@ case "$MODE" in
     else
       run_logs_module "true" "$BACKUP_DIR" "$EXPLAIN" "50"
     fi
+    ;;
+  brew-only)
+    run_brew_module "false" "$BACKUP_DIR" "$EXPLAIN"
     ;;
   *)
     echo "Unknown mode: $MODE"

@@ -38,11 +38,11 @@ Focus: **inspection-first storage visibility**
 
 ---
 
-## v1.2.0 (current development)
+## v1.2.0 (released)
 
 Focus: **inspection before cleanup**
 
-### Planned modules
+### Implemented modules
 
 #### Logs (inspection-first)
 
@@ -52,15 +52,6 @@ Focus: **inspection before cleanup**
 - Explain mode for rotation context and subfolders
 - Optional cleanup via relocation only
 
-Focus: **inspection before cleanup**
-
-#### Homebrew hygiene
-
-- Surface `brew doctor` issues
-- Detect unlinked or outdated kegs
-- Identify orphaned Homebrew services
-- Suggest commands, do not execute automatically
-
 #### App leftovers
 
 - Detect files left behind after app uninstall:
@@ -68,6 +59,21 @@ Focus: **inspection before cleanup**
   - Preferences
   - Containers
 - Correlate with missing app bundles
+
+---
+
+## v1.3.0 (current development)
+
+Focus: **inspection before cleanup**
+
+### Planned modules
+
+#### Homebrew hygiene (skeleton / inspection-only)
+
+- Surface `brew doctor` issues
+- Detect unlinked or outdated kegs
+- Identify orphaned Homebrew services
+- Suggest commands, do not execute automatically
 
 ---
 

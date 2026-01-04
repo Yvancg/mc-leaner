@@ -24,7 +24,7 @@ usage() {
 mc-leaner
 
 Usage:
-  bash mc-leaner.sh [--mode <scan|clean|report|launchd-only|bins-only|caches-only|logs-only>] [--apply] [--backup-dir <path>] [--explain]
+  bash mc-leaner.sh [--mode <scan|clean|report|launchd-only|bins-only|caches-only|logs-only|brew-only>] [--apply] [--backup-dir <path>] [--explain]
 
 Defaults:
   --mode scan     (dry-run, no moves)
@@ -39,6 +39,7 @@ Examples:
   bash mc-leaner.sh --mode report
   bash mc-leaner.sh --mode caches-only
   bash mc-leaner.sh --mode logs-only
+  bash mc-leaner.sh --mode brew-only
 EOF
 }
 

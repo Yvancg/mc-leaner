@@ -384,7 +384,11 @@ run_logs_module() {
   # Global summary contribution
   # ----------------------------
   if type summary_add >/dev/null 2>&1; then
-    summary_add "logs" "${#flagged_items[@]}" "${total_mb}MB" "${#move_failures[@]}"
+    # Module Output Contract: end-of-run summary line
+    # Format: <Module> flagged=<n> total_mb=<n> moved=<n> failures=<n>
+    # Notes:
+    # - This module does not currently track successful moves (only failures). We report moved=0 for now.
+    summary_add "Logs flagged=${#flagged_items[@]} total_mb=${total_mb} moved=0 failures=${#move_failures[@]}"
   fi
 
   if [[ "$apply" != "true" ]]; then

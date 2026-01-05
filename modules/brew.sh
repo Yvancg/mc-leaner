@@ -469,7 +469,7 @@ run_brew_module() {
     log "  Leaves: none"
   fi
 
-  log "Homebrew: v1.3.0 is read-only. No cleanup actions are performed."
+  log "Homebrew: inspection-only (read-only). No cleanup actions are performed."
 
   # ----------------------------
   # Global summary hook

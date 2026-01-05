@@ -42,7 +42,7 @@ If you want to understand what is running on your system—and clean it safely�
 
 ---
 
-## What mc-leaner does (v1)
+## What mc-leaner does (current)
 
 ### Launchd hygiene
 
@@ -50,7 +50,7 @@ If you want to understand what is running on your system—and clean it safely�
   - `/Library/LaunchAgents`
   - `/Library/LaunchDaemons`
   - `~/Library/LaunchAgents`
-- Detects **suspected orphaned** launchd plists by:
+- Detects **suspected orphaned or unmanaged** launchd plists by:
   - skipping active `launchctl` jobs
   - skipping known installed apps
   - skipping Homebrew-managed services
@@ -59,7 +59,8 @@ If you want to understand what is running on your system—and clean it safely�
 - Moves files to a **timestamped backup folder** on your Desktop
 - Supports `--explain` flag to provide detailed reasoning per item
 
-### /usr/local/bin inspection
+-### /usr/local/bin inspection
+(corresponds to `--mode bins-only`)
 
 - Optionally inspects `/usr/local/bin` for legacy or unmanaged binaries
 - Conservative and heuristic-based by design
@@ -124,6 +125,7 @@ Caches: total large caches (by heuristics): 3356MB
   - requires `--apply`
   - user-confirmed per item
   - moves logs to backup (never deletes)
+  - system paths may require explicit confirmation and are skipped in non-interactive contexts
 
 ### Homebrew hygiene (v1.3.0)
 
@@ -163,6 +165,7 @@ This module will focus on **understanding Homebrew state**, not blindly cleaning
 - Generates a report of **Intel-only executables** at:
   - `~/Desktop/intel_binaries.txt`
 - Reporting only. No removal.
+- Scans common application and support paths for executable files only
 
 ---
 
@@ -207,72 +210,86 @@ Every action requires user confirmation.
 
 ---
 
+## Global flags
+
+mc-leaner uses a small set of global flags that apply consistently across all modules.
+
+- `--apply`  
+  Enables file relocation. Without this flag, mc-leaner runs in **dry-run mode** and performs no changes.
+
+- `--explain`  
+  Shows detailed reasoning for why items are flagged or skipped. Strongly recommended before applying any changes.
+
+- `--mode <name>`  
+  Runs a single module instead of the default full scan.  
+  Examples: `launchd-only`, `caches-only`, `logs-only`, `leftovers-only`, `brew-only`.
+
+- `--help`  
+  Prints a short help message with available modes and exits.
+
+**Important:**  
+If mc-leaner cannot prompt for confirmation (non-interactive run), cleanup actions are skipped automatically for safety.
+
+---
+
 ## Usage
 
-Recommended first run (dry-run, no files moved):
+Follow this flow to stay safe and avoid surprises.
+
+1. Clone the repository
+
+```bash
+git clone https://github.com/Yvancg/mc-leaner.git
+cd mc-leaner
+```
+
+2. In your Terminal, run a safe scan first (default: dry-run)
 
 ```bash
 bash mc-leaner.sh
 ```
 
-Interactive clean (moves items to backup, never deletes):
+Nothing is moved. This shows what *would* be flagged.
+
+3. Inspect decisions with explanations (optional but recommended)
 
 ```bash
-bash mc-leaner.sh --mode clean --apply
+bash mc-leaner.sh --explain
 ```
 
-Run a specific module:
+Use this to understand why items are flagged or skipped.
+
+4. Run one module at a time (recommended)
+
+Examples:
 
 ```bash
-# launchd only (dry-run)
-bash mc-leaner.sh --mode launchd-only
-
-# /usr/local/bin only (dry-run)
-bash mc-leaner.sh --mode bins-only
-
-# Intel-only executable report
-bash mc-leaner.sh --mode report
-
-# Large user-level caches (dry-run)
-bash mc-leaner.sh --mode caches-only
-
-# App leftovers (dry-run)
-bash mc-leaner.sh --mode leftovers-only
-
-# Large log files and directories (dry-run)
-bash mc-leaner.sh --mode logs-only
-
-# Homebrew state
+bash mc-leaner.sh --mode launchd-only --explain
+bash mc-leaner.sh --mode caches-only --explain
+bash mc-leaner.sh --mode logs-only --explain
+bash mc-leaner.sh --mode leftovers-only --explain
 bash mc-leaner.sh --mode brew-only
 ```
 
-Use the `--explain` flag to get detailed explanations of findings:
+5. Apply moves only when you are ready
 
 ```bash
-# launchd only with explanations
-bash mc-leaner.sh --mode launchd-only --explain
-
-# caches inspection showing top subfolders
-bash mc-leaner.sh --mode caches-only --explain
-```
-
-All commands default to dry-run unless `--apply` is explicitly provided:
-
-```bash
-# Large log files and directories (apply)
-bash mc-leaner.sh --mode logs-only --apply
-
-# App leftovers (apply)
 bash mc-leaner.sh --mode leftovers-only --apply
 ```
 
----
+You will be prompted per item. Files are **moved to a backup folder**, never deleted.
 
-## Restore
+6. Restore if needed
 
-1. Open the backup folder created on your Desktop  
-2. Move files back to their original locations  
-3. Reboot
+- Open the backup folder created on your Desktop
+- Move items back to their original location
+- Reboot if the item relates to launchd or system services
+
+**Notes:**
+
+- All modules are inspection-first by default
+- If a prompt cannot be shown (non-interactive run), the move is skipped for safety
+- See `docs/FAQ.md` for common questions and edge cases
 
 ---
 
@@ -282,14 +299,14 @@ bash mc-leaner.sh --mode leftovers-only --apply
 mc-leaner/
 ├── mc-leaner.sh
 ├── modules/
-│   ├── launchd.sh
-│   ├── bins_usr_local.sh
-│   ├── intel.sh
-│   ├── caches.sh        # user-level cache inspection (implemented)
-│   ├── brew.sh          # Homebrew hygiene (implemented)
-│   ├── leftovers.sh     # app leftovers inspection (implemented)
-│   ├── logs.sh          # log inspection (implemented)
-│   └── permissions.sh   # planned
+│   ├── launchd.sh        # launchd plist inspection (agents & daemons)
+│   ├── bins_usr_local.sh # /usr/local/bin inspection for unmanaged binaries
+│   ├── intel.sh          # Intel-only executable reporting (informational)
+│   ├── caches.sh         # user-level cache inspection (implemented)
+│   ├── brew.sh           # Homebrew hygiene (inspection-only, implemented)
+│   ├── leftovers.sh      # app leftovers inspection (implemented)
+│   ├── logs.sh           # log inspection (implemented)
+│   └── permissions.sh    # planned
 ├── lib/
 │   ├── cli.sh
 │   ├── ui.sh
@@ -321,6 +338,7 @@ Future modules focus on **visibility first, cleanup second**:
 - Privacy and permissions audit
 
 No auto-clean. No silent behavior.
+See `docs/ROADMAP.md` for detailed planning.
 
 ---
 

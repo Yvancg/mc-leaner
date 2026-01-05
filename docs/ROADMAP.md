@@ -117,10 +117,63 @@ Focus: **execution context and permissions visibility**
 
 ## v2.x (medium term)
 
-Focus: **Deeper system diagnostics and cross-module correlation**
+Focus: **system intelligence and cross-module correlation**
+
+v2.x deepens mc-leaner’s inspection capabilities by connecting signals across modules.
+This phase remains strictly CLI-first and inspection-only.
 
 ### Planned modules
 
+#### Startup & execution graph
+
+- Correlate LaunchAgents, LaunchDaemons, login items, and app helpers
+- Show execution timing (boot, login, on-demand)
+- Distinguish user vs system scope
+- Explain mode describing launch relationships
+
+#### Disk usage attribution
+
+- Attribute disk usage by app bundle ID and toolchain
+- Correlate caches, logs, leftovers, binaries, and Homebrew assets
+- Surface top disk consumers by inferred owner
+- Explain mode showing attribution logic
+
+#### Binary provenance & trust metadata
+
+- Inspect executable signing status
+- Surface notarization and Team ID when available
+- Distinguish system, vendor, and user-built binaries
+- No judgments or enforcement, visibility only
+
+#### Environment pollution (developer-focused)
+
+- Inspect PATH ordering and shadowed binaries
+- Detect duplicate tools across multiple locations
+- Show which binary is actually executed for common commands
+- Explain mode for resolution logic
+
+#### Cross-module explain engine
+
+- Generate narrative explanations across modules
+- Answer “why this exists” and “what caused this”
+- Serve as the foundation for future UI layers
+
+## v3.0 (long term)
+
+Focus: **self-contained inspection application**
+
+v3.0 introduces a self-contained app built on top of the existing CLI logic,
+after module outputs and explain narratives have stabilized.
+
+### Direction
+
+- Thin UI wrapper over existing inspection modules
+- Read-only by default
+- No background daemons
+- No automatic cleanup actions
+- Report export and visualization focused
+
+Any UI must remain transparent, auditable, and subordinate to the CLI.
 ---
 
 ## Explicit non-goals

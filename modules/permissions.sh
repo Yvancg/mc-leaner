@@ -24,25 +24,84 @@ is_interactive() {
 detect_host_app() {
   # Purpose: best-effort identify the host app (Terminal, iTerm, VS Code)
   # Safety: inspection only
-  local ppid="${PPID:-}"
-  local comm=""
+  # Note: PPID is often a shell (zsh/bash). We walk up the process tree to find the GUI host.
 
-  if [ -n "$ppid" ] && is_cmd ps; then
-    comm="$(ps -p "$ppid" -o comm= 2>/dev/null | awk '{print $1}' | tr -d '\n')"
+  if ! is_cmd ps; then
+    echo "unknown"
+    return 0
   fi
 
-  case "$comm" in
-    Terminal|Terminal.app) echo "Terminal" ;;
-    iTerm2|iTerm2.app) echo "iTerm2" ;;
-    Code|Code.app|Electron) echo "VS Code" ;;
-    *)
-      if [ -n "$comm" ]; then
-        echo "$comm"
-      else
-        echo "unknown"
-      fi
-      ;;
-  esac
+  local pid="${PPID:-}"
+  local depth=0
+  local comm=""
+  local ppid=""
+
+  # Walk up a few levels to find the first recognizable GUI host.
+  # Bash 3.2 safe loop.
+  while [ -n "$pid" ] && [ "$pid" -gt 1 ] 2>/dev/null && [ $depth -lt 8 ]; do
+    # `ps -o comm=` can return a full path that may include spaces (e.g. "/Applications/Visual Studio Code.app/..."),
+    # so we must NOT split on whitespace.
+    local comm_raw=""
+    local comm_base=""
+
+    comm_raw="$(ps -p "$pid" -o comm= 2>/dev/null || true)"
+    comm="$(printf "%s" "$comm_raw" | sed 's/[[:space:]]*$//')"
+    comm_base="$(basename "$comm" 2>/dev/null || printf "%s" "$comm")"
+
+    # Match on both the raw command (may be a path) and the basename.
+    case "$comm_base" in
+      Terminal|Terminal.app)
+        echo "Terminal"; return 0
+        ;;
+      iTerm2|iTerm2.app)
+        echo "iTerm2"; return 0
+        ;;
+      Code|Code.app)
+        echo "VS Code"; return 0
+        ;;
+      Electron)
+        # Many Electron apps report `Electron`. Try to disambiguate via args when possible.
+        local args=""
+        args="$(ps -p "$pid" -o args= 2>/dev/null | tr -d '\n')"
+        if printf "%s" "$args" | grep -qi "Visual Studio Code"; then
+          echo "VS Code"; return 0
+        fi
+        ;;
+    esac
+
+    # Some hosts expose a full path in `comm` (including spaces). Catch common patterns.
+    if printf "%s" "$comm" | grep -qi "Visual Studio Code\.app"; then
+      echo "VS Code"; return 0
+    fi
+    if printf "%s" "$comm" | grep -qi "Terminal\.app"; then
+      echo "Terminal"; return 0
+    fi
+    if printf "%s" "$comm" | grep -qi "iTerm\.app\|iTerm2\.app"; then
+      echo "iTerm2"; return 0
+    fi
+
+    # Move to parent process
+    ppid="$(ps -p "$pid" -o ppid= 2>/dev/null | tr -d ' ' | tr -d '\n')"
+    if [ -z "$ppid" ] || [ "$ppid" = "$pid" ]; then
+      break
+    fi
+
+    pid="$ppid"
+    depth=$((depth + 1))
+  done
+
+  # Fallback: report the immediate parent command (may be a shell path like /bin/zsh)
+  if [ -n "$comm_base" ]; then
+    case "$comm_base" in
+      zsh|bash|sh|fish|/bin/zsh|/bin/bash|/bin/sh) echo "shell" ;;
+      *) echo "$comm_base" ;;
+    esac
+  elif [ -n "$comm" ]; then
+    # Last-resort: print the raw command string
+    echo "$comm"
+  else
+    echo "unknown"
+  fi
 }
 
 can_gui_prompt() {

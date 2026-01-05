@@ -85,7 +85,7 @@ If you want to understand what is running on your systemâ€”and clean it safelyâ€
 #### Example output (inspect mode)
 
 ```text
-[2026-01-02 14:14:33] Caches: scanned 88 directories; found 4 >= 200MB.
+[2026-01-02 14:14:33] Caches: scanned 88 directories; found 2 >= 200MB.
 
 CACHE GROUP: Google
 CACHE? 1799MB | modified: 2025-02-03 13:13:57 | owner: Google
@@ -100,20 +100,6 @@ CACHE? 438MB | modified: 2026-01-02 12:27:04 | owner: Homebrew
     - 366MB | downloads
     - 46MB  | api
     - 13MB  | bootsnap
-
-CACHE GROUP: WhatsApp (net.whatsapp.WhatsApp)
-CACHE? 643MB | modified: 2025-11-13 17:44:31 | owner: WhatsApp
-  path: ~/Library/Caches/net.whatsapp.WhatsApp
-  Subfolders (top 3 by size):
-    - 643MB | org.sparkle-project.Sparkle
-
-CACHE GROUP: ms-playwright
-CACHE? 476MB | modified: 2025-09-30 10:56:42 | owner: ms-playwright
-  path: ~/Library/Caches/ms-playwright
-  Subfolders (top 3 by size):
-    - 297MB | chromium-1193
-    - 176MB | chromium_headless_shell-1193
-    - 2MB   | ffmpeg-1011
 
 Caches: total large caches (by heuristics): 3356MB
 ```

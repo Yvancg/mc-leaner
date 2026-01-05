@@ -165,6 +165,7 @@ This module will focus on **understanding Homebrew state**, not blindly cleaning
 
 - Generates a report of **Intel-only executables** at:
   - `~/Desktop/intel_binaries.txt`
+- Intel-only does not mean unsafe; this is informational for Apple Silicon users.
 - Reporting only. No removal.
 - Scans common application and support paths for executable files only
 

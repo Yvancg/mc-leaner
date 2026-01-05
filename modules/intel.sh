@@ -58,9 +58,28 @@ run_intel_report() {
   # ----------------------------
   # Summary
   # ----------------------------
-  local count=0
+  # NOTE:
+  # - The report can contain multiple lines per executable (for example, a universal header line
+  #   plus an architecture-specific line like "(for architecture x86_64)").
+  # - For stable reporting, we compute BOTH:
+  #   - report_lines: raw lines written to the report (debug metric)
+  #   - unique_files: normalized unique paths (stable metric)
+
+  local report_lines=0
+  local unique_files=0
+
   if [[ -f "$out" ]]; then
-    count=$(wc -l < "$out" | tr -d ' ' || echo 0)
+    report_lines=$(wc -l < "$out" | tr -d ' ' || echo 0)
+
+    # `file` output format: /path/to/file: Mach-O ...
+    # Normalize paths by removing the architecture suffix emitted by `file`.
+    unique_files=$(
+      awk -F':' '{print $1}' "$out" 2>/dev/null \
+        | sed 's/ (for architecture x86_64)$//' \
+        | sort -u \
+        | wc -l \
+        | tr -d ' ' || echo 0
+    )
   fi
 
   # ----------------------------
@@ -71,22 +90,27 @@ run_intel_report() {
   local -a flagged_items=()
   local preview_limit=10
 
-  if [[ -f "$out" && "$count" -gt 0 ]]; then
+  if [[ -f "$out" && "$unique_files" -gt 0 ]]; then
     # `file` output format: /path/to/file: Mach-O ...
-    # Extract just the path prefix for human-readable preview.
+    # Extract and normalize paths for a stable human-readable preview.
     while IFS= read -r p; do
       [[ -n "$p" ]] && flagged_items+=("$p")
-    done < <(awk -F':' '{print $1}' "$out" 2>/dev/null | head -n "$preview_limit")
+    done < <(
+      awk -F':' '{print $1}' "$out" 2>/dev/null \
+        | sed 's/ (for architecture x86_64)$//' \
+        | sort -u \
+        | head -n "$preview_limit"
+    )
   fi
 
-  if [[ "$count" -eq 0 ]]; then
-    log "Intel: no Intel-only executables found (by heuristics)."
+  if [[ "$unique_files" -eq 0 ]]; then
+    log "Intel: no x86_64 Mach-O executables found (by heuristics)."
     log "Intel: report written to: $out"
     log "Intel: flagged items: none"
     return 0
   fi
 
-  log "Intel: found ${count} Intel-only executable(s)."
+  log "Intel: found ${unique_files} executable(s) with an x86_64 slice (report lines: ${report_lines})."
   log "Intel: full list written to: $out"
 
   log "Intel: flagged items (preview, top ${preview_limit}):"
@@ -97,17 +121,21 @@ run_intel_report() {
     for i in "${flagged_items[@]}"; do
       log "  - ${i}"
     done
-    if [[ "$count" -gt "$preview_limit" ]]; then
-      log "Intel: (${count} total) See full list for remaining items: $out"
+    if [[ "$unique_files" -gt "$preview_limit" ]]; then
+      log "Intel: (${unique_files} total) See full list for remaining items: $out"
     fi
   fi
 
   # ----------------------------
   # Explain-mode grouping summary
   # ----------------------------
-  if [[ "$explain" == "true" && "$count" -gt 0 && -f "$out" ]]; then
-    log "Intel (explain): top locations by count (top 10):"
+  if [[ "$explain" == "true" && "$unique_files" -gt 0 && -f "$out" ]]; then
+    log "Intel (explain): top locations by unique file count (top 10):"
+
+    # Use normalized unique paths so the grouping is stable across `file` output variants.
     awk -F':' '{print $1}' "$out" \
+      | sed 's/ (for architecture x86_64)$//' \
+      | sort -u \
       | awk -F'/' 'NF>2 {print "/"$2"/"$3}' \
       | sort \
       | uniq -c \
@@ -121,9 +149,9 @@ run_intel_report() {
   # ----------------------------
   # Module end-of-run summary
   # ----------------------------
-  if [[ "$count" -eq 0 ]]; then
+  if [[ "$unique_files" -eq 0 ]]; then
     summary_add "intel" "flagged=0 report=${out}"
   else
-    summary_add "intel" "flagged=${count} report=${out}"
+    summary_add "intel" "flagged=${unique_files} report_lines=${report_lines} report=${out}"
   fi
 }

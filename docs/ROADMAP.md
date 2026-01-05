@@ -174,6 +174,7 @@ after module outputs and explain narratives have stabilized.
 - Report export and visualization focused
 
 Any UI must remain transparent, auditable, and subordinate to the CLI.
+
 ---
 
 ## Explicit non-goals

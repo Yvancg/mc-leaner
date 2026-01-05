@@ -101,7 +101,7 @@ print_fda_steps() {
   log "  4) Close and re-open the app, then re-run mc-leaner"
 }
 
-run_permissions() {
+run_permissions_module() {
   # Purpose: run environment checks and print clear diagnostics
   # Safety: inspection only
 
@@ -223,10 +223,10 @@ run_permissions() {
 # ----------------------------
 # Module contract
 # ----------------------------
-# Purpose: provide `run_permissions` for the entrypoint to call.
+# Purpose: provide `run_permissions_module` for the entrypoint to call.
 # Safety: do not auto-execute on source.
 #
 # The entrypoint (mc-leaner.sh) is responsible for calling:
-#   run_permissions
+#   run_permissions_module
 #
 # End of module.

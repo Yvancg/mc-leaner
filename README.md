@@ -59,7 +59,8 @@ If you want to understand what is running on your systemâ€”and clean it safelyâ€
 - Moves files to a **timestamped backup folder** on your Desktop
 - Supports `--explain` flag to provide detailed reasoning per item
 
--### /usr/local/bin inspection
+### /usr/local/bin inspection
+
 (corresponds to `--mode bins-only`)
 
 - Optionally inspects `/usr/local/bin` for legacy or unmanaged binaries

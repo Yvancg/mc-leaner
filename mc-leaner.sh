@@ -28,6 +28,7 @@ source "$ROOT_DIR/modules/logs.sh"
 
 source "$ROOT_DIR/modules/brew.sh"
 source "$ROOT_DIR/modules/leftovers.sh"
+source "$ROOT_DIR/modules/permissions.sh"
 
 
 # ----------------------------
@@ -164,6 +165,8 @@ case "$MODE" in
     summary_add "caches: inspected"
     run_logs_module "false" "$BACKUP_DIR" "$EXPLAIN" "50"
     summary_add "logs: inspected (threshold=50MB)"
+    run_permissions_module "false" "$BACKUP_DIR" "$EXPLAIN"
+    summary_add "permissions: inspected"
     ensure_installed_bundle_ids
     run_leftovers_module "false" "$BACKUP_DIR" "$EXPLAIN" "$installed_bundle_ids_file"
     summary_add "leftovers: inspected (threshold=50MB)"
@@ -185,6 +188,8 @@ case "$MODE" in
     summary_add "caches: cleaned"
     run_logs_module "true" "$BACKUP_DIR" "$EXPLAIN" "50"
     summary_add "logs: cleaned (threshold=50MB)"
+    run_permissions_module "true" "$BACKUP_DIR" "$EXPLAIN"
+    summary_add "permissions: cleaned"
     ensure_installed_bundle_ids
     run_leftovers_module "true" "$BACKUP_DIR" "$EXPLAIN" "$installed_bundle_ids_file"
     summary_add "leftovers: cleaned (threshold=50MB)"
@@ -241,6 +246,15 @@ case "$MODE" in
     else
       run_logs_module "true" "$BACKUP_DIR" "$EXPLAIN" "50"
       summary_add "logs: cleaned (threshold=50MB)"
+    fi
+    ;;
+  permissions-only)
+    if [[ "$APPLY" != "true" ]]; then
+      run_permissions_module "false" "$BACKUP_DIR" "$EXPLAIN"
+      summary_add "permissions: inspected"
+    else
+      run_permissions_module "true" "$BACKUP_DIR" "$EXPLAIN"
+      summary_add "permissions: cleaned"
     fi
     ;;
   brew-only)

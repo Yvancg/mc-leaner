@@ -332,13 +332,32 @@ mc-leaner/
 
 ## Roadmap (high level)
 
-Future modules focus on **visibility first, cleanup second**:
+mc-leaner is feature-complete for its initial safety-first vision. Future work focuses on **refinement, clarity, and edge-case hardening**, not aggressive cleanup.
 
-- App uninstall leftovers
-- Privacy and permissions audit
+Planned directions:
 
-No auto-clean. No silent behavior.
-See `docs/ROADMAP.md` for detailed planning.
+- Refinement of existing modules
+  - Reduce false positives further (especially leftovers and logs)
+  - Improve ownership detection and reporting
+  - Better handling of protected and system-managed paths
+
+- UX and safety improvements
+  - Clearer non-interactive behavior reporting
+  - Improved summaries and decision transparency
+  - Optional machine-readable report output (JSON)
+
+- Documentation and governance
+  - Expanded FAQ with real-world scenarios
+  - Clearer contribution and review guidelines
+  - Stability guarantees per module
+
+Explicitly **out of scope**:
+- Automatic cleanup
+- Background agents or scheduled runs
+- Deletion-based workflows
+- “One-click” cleaning modes
+
+See `docs/ROADMAP.md` for detailed and evolving planning.
 
 ---
 

@@ -1,5 +1,3 @@
-
-
 #!/bin/bash
 # mc-leaner: logs module (inspection-first)
 # Purpose: identify large log files and log directories (user + system)
@@ -131,7 +129,7 @@ _logs_confirm_move() {
   elif [[ -t 0 ]]; then
     prompt_in="/dev/stdin"
   else
-    explain_log "Logs: SKIP (non-interactive; cannot prompt): $p"
+    # Cannot safely prompt (no controlling TTY)
     return 2
   fi
 
@@ -145,7 +143,6 @@ _logs_confirm_move() {
   local ans=""
   if ! IFS= read -r ans < "$prompt_in"; then
     # No input received (EOF). Treat as non-response.
-    explain_log "Logs: SKIP (no input; prompt cancelled): $p"
     return 2
   fi
 

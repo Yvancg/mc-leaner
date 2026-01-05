@@ -55,10 +55,37 @@ SUMMARY_MODULE_LINES=()
 SUMMARY_ACTION_LINES=()
 SUMMARY_INFO_LINES=()
 
+summary__ensure_arrays() {
+  # Purpose: ensure summary arrays exist even if unset by a caller
+  # Safety: logging only
+  # Notes: required for Bash 3.2 + `set -u` (avoids unbound variable errors)
+
+  if ! declare -p SUMMARY_LINES >/dev/null 2>&1; then
+    declare -a SUMMARY_LINES
+    SUMMARY_LINES=()
+  fi
+
+  if ! declare -p SUMMARY_MODULE_LINES >/dev/null 2>&1; then
+    declare -a SUMMARY_MODULE_LINES
+    SUMMARY_MODULE_LINES=()
+  fi
+
+  if ! declare -p SUMMARY_ACTION_LINES >/dev/null 2>&1; then
+    declare -a SUMMARY_ACTION_LINES
+    SUMMARY_ACTION_LINES=()
+  fi
+
+  if ! declare -p SUMMARY_INFO_LINES >/dev/null 2>&1; then
+    declare -a SUMMARY_INFO_LINES
+    SUMMARY_INFO_LINES=()
+  fi
+}
+
 summary_add() {
   # Usage (legacy): summary_add "Module: flagged 2; moved 1; failures 0"
   # Purpose: allow older modules to register a human-readable summary line
   # Safety: logging only
+  summary__ensure_arrays
   SUMMARY_LINES+=("$*")
 }
 
@@ -66,6 +93,7 @@ summary_add_module_line() {
   # Usage: summary_add_module_line "caches scanned_dirs=88 total_mb=599 | flagged=1 | moved=no"
   # Purpose: register a single, parseable module line for the consolidated summary
   # Safety: logging only
+  summary__ensure_arrays
   SUMMARY_MODULE_LINES+=("$*")
 }
 
@@ -73,6 +101,7 @@ summary_add_action() {
   # Usage: summary_add_action "caches: 1 item(s) above threshold (review before moving)"
   # Purpose: register an action-required line (things that likely need user attention)
   # Safety: logging only
+  summary__ensure_arrays
   SUMMARY_ACTION_LINES+=("$*")
 }
 
@@ -80,31 +109,21 @@ summary_add_info() {
   # Usage: summary_add_info "intel: report written to /Users/yvan/Desktop/intel_binaries.txt"
   # Purpose: register an informational line (non-actionable outputs)
   # Safety: logging only
+  summary__ensure_arrays
   SUMMARY_INFO_LINES+=("$*")
 }
 
 summary_print() {
   # Purpose: print consolidated summary at end of run
 
-  # Bash 3.2 + set -u safety: arrays may not be initialized in some execution paths
-  # (e.g., if a caller uses summary_print without sourcing the full module graph).
-  local has_any=false
+  summary__ensure_arrays
 
-  local module_count=0
-  local legacy_count=0
-  local action_count=0
-  local info_count=0
+  local module_count=${#SUMMARY_MODULE_LINES[@]}
+  local legacy_count=${#SUMMARY_LINES[@]}
+  local action_count=${#SUMMARY_ACTION_LINES[@]}
+  local info_count=${#SUMMARY_INFO_LINES[@]}
 
-  if declare -p SUMMARY_MODULE_LINES >/dev/null 2>&1; then module_count=${#SUMMARY_MODULE_LINES[@]}; fi
-  if declare -p SUMMARY_LINES >/dev/null 2>&1; then legacy_count=${#SUMMARY_LINES[@]}; fi
-  if declare -p SUMMARY_ACTION_LINES >/dev/null 2>&1; then action_count=${#SUMMARY_ACTION_LINES[@]}; fi
-  if declare -p SUMMARY_INFO_LINES >/dev/null 2>&1; then info_count=${#SUMMARY_INFO_LINES[@]}; fi
-
-  if [ "$module_count" -gt 0 ] || [ "$legacy_count" -gt 0 ] || [ "$action_count" -gt 0 ] || [ "$info_count" -gt 0 ]; then
-    has_any=true
-  fi
-
-  if [ "$has_any" != "true" ]; then
+  if [ "$module_count" -eq 0 ] && [ "$legacy_count" -eq 0 ] && [ "$action_count" -eq 0 ] && [ "$info_count" -eq 0 ]; then
     return 0
   fi
 

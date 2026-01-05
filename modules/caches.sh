@@ -164,6 +164,7 @@ run_caches_module() {
   local flagged_items=()
   local move_failures=()
   report_file="$(tmpfile)"
+  local moved_count=0
 
   for d in "${candidates[@]}"; do
     local kb mb mod owner
@@ -225,6 +226,7 @@ run_caches_module() {
         if move_out="$(safe_move "$path" "$backup_dir" 2>&1)"; then
           # Contract: log both source and resolved destination for legibility.
           log "Moved: $path -> $move_out"
+          moved_count=$((moved_count + 1))
         else
           # Contract: keep the item flagged, but surface a clear move failure summary at end-of-run.
           move_failures+=("$path | failed: $move_out")
@@ -263,11 +265,7 @@ run_caches_module() {
   # ----------------------------
   # Module summary (global footer aggregation)
   # ----------------------------
-  summary_add "Caches" \
-    "scanned=${scanned_dirs}" \
-    "flagged=${flagged_count}" \
-    "total_mb=${overall_total_mb}" \
-    "moved=$( [[ \"$mode\" == \"clean\" && \"$apply\" == \"true\" ]] && echo yes || echo no )"
+  summary_add "Caches flagged=${flagged_count} total_mb=${overall_total_mb} moved=${moved_count} failures=${#move_failures[@]} scanned=${scanned_dirs} (threshold=${min_mb}MB)"
 }
 
 # End of module

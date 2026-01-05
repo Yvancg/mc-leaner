@@ -98,19 +98,28 @@ Focus: **safe app residue inspection**
 
 ---
 
+## v1.5.0 (released)
+
+Focus: **execution context and permissions visibility**
+
+### Implemented modules
+
+#### Permissions (inspection-only)
+
+- Detect execution context (interactive vs non-interactive)
+- Identify host application (Terminal, VS Code, etc.)
+- Detect GUI prompt availability
+- Check accessibility of key paths (Containers, Group Containers, Logs, LaunchAgents/Daemons)
+- Detect obvious TCC access blocks (best-effort)
+- No permission changes, no prompts, no system mutations
+
+---
+
 ## v2.x (medium term)
 
-Focus: **system understanding, not removal**
+Focus: **Deeper system diagnostics and cross-module correlation**
 
 ### Planned modules
-
-#### Permissions audit
-
-- Report apps with:
-  - Full Disk Access
-  - Accessibility
-  - Screen Recording
-- No changes, visibility only
 
 ---
 

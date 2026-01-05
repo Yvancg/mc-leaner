@@ -161,9 +161,22 @@ This module will focus on **understanding Homebrew state**, not blindly cleaning
   - relocates folders to backup (never deletes)
 - Designed for reviewing old app remnants, not active application data
 
+### Permissions inspection (v1.5.0)
+
+- Inspects execution environment and permission boundaries
+- Detects:
+  - interactive vs non-interactive runs
+  - host application context (Terminal, VS Code, etc.)
+  - GUI prompt availability
+  - accessible vs restricted system locations
+- Explains why certain actions are skipped for safety
+- Integrated into full scan and available as `permissions-only` mode
+- Inspection-only; never performs cleanup actions
+- Supports `--explain`
+
 ### Architecture reporting
 
-- Generates a report of **Intel-only executables** at:
+- Generates a report of **Intel-only executables (no arm64 slice)** at:
   - `~/Desktop/intel_binaries.txt`
 - Intel-only does not mean unsafe; this is informational for Apple Silicon users.
 - Reporting only. No removal.
@@ -267,11 +280,16 @@ Examples:
 
 ```bash
 bash mc-leaner.sh --mode launchd-only --explain
+bash mc-leaner.sh --mode bins-only --explain
 bash mc-leaner.sh --mode caches-only --explain
 bash mc-leaner.sh --mode logs-only --explain
 bash mc-leaner.sh --mode leftovers-only --explain
-bash mc-leaner.sh --mode brew-only
+bash mc-leaner.sh --mode brew-only --explain
+bash mc-leaner.sh --mode permissions-only --explain
+bash mc-leaner.sh --mode intel-only
 ```
+
+**Note:** `intel-only` is a reporting-only mode. It never performs cleanup actions and does not support `--apply`.
 
 5. Apply moves only when you are ready
 
@@ -308,7 +326,7 @@ mc-leaner/
 │   ├── brew.sh           # Homebrew hygiene (inspection-only, implemented)
 │   ├── leftovers.sh      # app leftovers inspection (implemented)
 │   ├── logs.sh           # log inspection (implemented)
-│   └── permissions.sh    # planned
+│   └── permissions.sh    # execution context & permission inspection
 ├── lib/
 │   ├── cli.sh
 │   ├── ui.sh
@@ -334,7 +352,7 @@ mc-leaner/
 
 ## Roadmap (high level)
 
-mc-leaner is feature-complete for its initial safety-first vision. Future work focuses on **refinement, clarity, and edge-case hardening**, not aggressive cleanup.
+mc-leaner’s core inspection modules are now in place. Future work focuses on refinement, clarity, and edge-case hardening.
 
 Planned directions:
 

@@ -10,6 +10,30 @@ This project follows a pragmatic versioning scheme:
 
 ---
 
+## 1.5.0 - Permissions inspection
+
+**Release date:** 2026-01-06
+
+### Added
+
+- Permissions inspection module
+  - Detects execution context and permission constraints
+  - Explains skipped actions due to interactivity, GUI availability, or restricted paths
+  - Integrated into scan and standalone permissions-only mode
+
+### Fixed
+
+- Intel-only executable reporting:
+  - Corrected counting logic
+  - Stabilized preview output
+  - Added top-source summaries
+  - Hardened report pipeline
+
+### Improved
+
+- Standardized Logs and Caches summary output
+- Clarified Homebrew inspection-only messaging
+
 ## v1.4.0 — Leftovers inspection & cleanup menu
 
 **Release date:** 2026-01-05

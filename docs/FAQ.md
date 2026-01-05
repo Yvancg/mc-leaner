@@ -112,6 +112,25 @@ No logs are ever deleted automatically.
 
 ---
 
+## What does the Permissions module do?
+
+The Permissions module (introduced in v1.5.0) is **inspection-only**.
+
+It checks whether mc-leaner is running in an environment that allows reliable inspection, and reports:
+
+- whether the session is interactive
+- which host application launched mc-leaner (Terminal, VS Code, etc.)
+- whether GUI prompts are available
+- whether known TCC-protected locations are accessible or blocked
+
+This module **does not change any permissions**, request new access, or modify system settings.
+
+Its purpose is diagnostic: to explain *why* certain paths may be skipped or partially scanned on modern macOS versions.
+
+Nothing is moved or modified, even with `--apply`.
+
+---
+
 ## What does the App Leftovers module do?
 
 The App Leftovers module (introduced in v1.4.0) is **inspection-first**.
@@ -162,6 +181,8 @@ There is no automatic cleanup or uninstall actions.
 
 All output is informational unless future versions explicitly add safe, confirmed actions.
 
+The Homebrew module never removes, uninstalls, or modifies Homebrew state.
+
 ---
 
 ## Does mc-leaner work on Apple Silicon?
@@ -169,6 +190,8 @@ All output is informational unless future versions explicitly add safe, confirme
 Yes.
 
 mc-leaner is fully compatible with Apple Silicon Macs. One of its features is reporting **Intel-only executables** so you can decide whether legacy software is still worth keeping.
+
+Intel-only binaries are **reported only** and are never modified or removed by mc-leaner.
 
 ---
 
@@ -225,7 +248,7 @@ See CONTRIBUTING.md for details.
 
 ## Does mc-leaner run things I did not ask for?
 
-mc-leaner only runs modules implied by the selected mode.
+mc-leaner only runs modules explicitly selected by the chosen mode.
 
 The default scan mode runs all inspection modules but performs no destructive actions.
 

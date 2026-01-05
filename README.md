@@ -221,68 +221,29 @@ Interactive clean (moves items to backup, never deletes):
 bash mc-leaner.sh --mode clean --apply
 ```
 
-Generate Intel-only executable report:
-
-```bash
-bash mc-leaner.sh --mode report
-```
-
-Inspect large user-level caches (dry-run):
-
-```bash
-bash mc-leaner.sh --mode caches-only
-```
-
-Inspect and optionally relocate large user-level caches:
-
-```bash
-bash mc-leaner.sh --mode caches-only --apply
-```
-
-**inspect app leftovers (dry-run)**
-bash mc-leaner.sh --mode leftovers-only
-
-**inspect and optionally relocate leftovers**
-bash mc-leaner.sh --mode leftovers-only --apply
-
-Inspect large log files and directories (dry-run):
-
-```bash
-bash mc-leaner.sh --mode logs-only
-```
-
-Inspect logs with detailed explanations:
-
-```bash
-bash mc-leaner.sh --mode logs-only --explain
-```
-
-Inspect and optionally relocate selected logs:
-
-```bash
-bash mc-leaner.sh --mode logs-only --apply
-```
-
-Inspect Homebrew state:
-
-```bash
-bash mc-leaner.sh --mode brew-only
-```
-
 Run a specific module:
 
 ```bash
 # launchd only (dry-run)
 bash mc-leaner.sh --mode launchd-only
 
-# launchd only (apply)
-bash mc-leaner.sh --mode launchd-only --apply
-
 # /usr/local/bin only (dry-run)
 bash mc-leaner.sh --mode bins-only
 
-# /usr/local/bin only (apply)
-bash mc-leaner.sh --mode bins-only --apply
+# Intel-only executable report
+bash mc-leaner.sh --mode report
+
+# Large user-level caches (dry-run)
+bash mc-leaner.sh --mode caches-only
+
+# App leftovers (dry-run)
+bash mc-leaner.sh --mode leftovers-only
+
+# Large log files and directories (dry-run)
+bash mc-leaner.sh --mode logs-only
+
+# Homebrew state
+bash mc-leaner.sh --mode brew-only
 ```
 
 Use the `--explain` flag to get detailed explanations of findings:
@@ -291,14 +252,19 @@ Use the `--explain` flag to get detailed explanations of findings:
 # launchd only with explanations
 bash mc-leaner.sh --mode launchd-only --explain
 
-# /usr/local/bin inspection with explanations
-bash mc-leaner.sh --mode bins-only --explain
-
 # caches inspection showing top subfolders
 bash mc-leaner.sh --mode caches-only --explain
 ```
 
-All commands default to dry-run unless `--apply` is explicitly provided.
+All commands default to dry-run unless `--apply` is explicitly provided:
+
+```bash
+# Large log files and directories (apply)
+bash mc-leaner.sh --mode logs-only --apply
+
+# App leftovers (apply)
+bash mc-leaner.sh --mode leftovers-only --apply
+```
 
 ---
 

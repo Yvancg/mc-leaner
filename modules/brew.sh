@@ -192,8 +192,9 @@ _brew_top_n_largest_formulae() {
     printf "%s|%s\n" "$mb" "$f" >> "$tmp"
   done
 
-  sort -t '|' -k1,1nr "$tmp" 2>/dev/null | head -n "$n" | while IFS='|' read -r mb f; do
+  while IFS='|' read -r mb f; do
     [[ -n "$f" ]] || continue
+
     local versions
     versions="$(_brew_versions_for_formula "$f")"
     # Collapse versions to one line
@@ -204,7 +205,7 @@ _brew_top_n_largest_formulae() {
     if [[ "${EXPLAIN:-false}" == "true" ]]; then
       explain_log "  source: Cellar size (best-effort)"
     fi
-  done
+  done < <(sort -t '|' -k1,1nr "$tmp" 2>/dev/null | head -n "$n")
 }
 
 _brew_cache_downloads_summary() {

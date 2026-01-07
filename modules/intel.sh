@@ -50,6 +50,26 @@ run_intel_report() {
     )
   fi
 
+  # De-duplicate roots (Bash 3.2 compatible, preserves order)
+  if [[ "${#roots[@]}" -gt 1 ]]; then
+    local uniq_roots=()
+    local rr
+    local seen
+    for rr in "${roots[@]}"; do
+      [[ -n "$rr" ]] || continue
+      seen="no"
+      local ur
+      for ur in "${uniq_roots[@]}"; do
+        if [[ "$ur" == "$rr" ]]; then
+          seen="yes"
+          break
+        fi
+      done
+      [[ "$seen" == "yes" ]] || uniq_roots+=("$rr")
+    done
+    roots=("${uniq_roots[@]}")
+  fi
+
   log "Scanning for Intel-only executables (informational)..."
 
   if [[ "$explain" == "true" ]]; then
@@ -89,43 +109,48 @@ run_intel_report() {
   fi
 
   # Iterate executables and decide per-file.
-  # NOTE: `-perm +111` is used for macOS Bash 3.2 compatibility.
-  while IFS= read -r p; do
-    # Defensive: must be a real file.
-    [[ -n "$p" && "$p" == /* && -f "$p" ]] || continue
+  # NOTE: `-perm -111` is used for macOS Bash 3.2 compatibility.
+  local root
+  for root in "${roots[@]}"; do
+    [[ -n "$root" && "$root" == /* && -e "$root" ]] || continue
 
-    local archs=""
-    local has_x86="no"
-    local has_arm="no"
+    while IFS= read -r p; do
+      # Defensive: must be a real file.
+      [[ -n "$p" && "$p" == /* && -f "$p" ]] || continue
 
-    # Prefer lipo first (much faster than `file` when it works).
-    if [[ "$have_lipo" == "yes" ]]; then
-      archs=$(lipo -archs "$p" 2>/dev/null || true)
-      if [[ -n "$archs" ]]; then
-        echo "$archs" | grep -qw "x86_64" && has_x86="yes"
-        (echo "$archs" | grep -qw "arm64" || echo "$archs" | grep -qw "arm64e") && has_arm="yes"
+      local archs=""
+      local has_x86="no"
+      local has_arm="no"
+
+      # Prefer lipo first (much faster than `file` when it works).
+      if [[ "$have_lipo" == "yes" ]]; then
+        archs=$(lipo -archs "$p" 2>/dev/null || true)
+        if [[ -n "$archs" ]]; then
+          echo "$archs" | grep -qw "x86_64" && has_x86="yes"
+          (echo "$archs" | grep -qw "arm64" || echo "$archs" | grep -qw "arm64e") && has_arm="yes"
+        fi
       fi
-    fi
 
-    # If lipo did not provide arch info, fall back to `file`.
-    if [[ -z "$archs" ]]; then
-      local fdesc
-      fdesc=$(file "$p" 2>/dev/null || true)
-      echo "$fdesc" | grep -q "Mach-O" || continue
-      echo "$fdesc" | grep -q "x86_64" && has_x86="yes"
-      (echo "$fdesc" | grep -q "arm64" || echo "$fdesc" | grep -q "arm64e") && has_arm="yes"
-    fi
-
-    # Intel-only means x86_64 present AND no arm slice.
-    if [[ "$has_x86" == "yes" && "$has_arm" == "no" ]]; then
-      if [[ -n "$archs" ]]; then
-        printf "%s: archs=%s\n" "$p" "$archs" >> "$tmp_out" 2>/dev/null || true
-      else
-        # Keep a stable, one-line-per-file record.
-        printf "%s: Intel-only (x86_64)\n" "$p" >> "$tmp_out" 2>/dev/null || true
+      # If lipo did not provide arch info, fall back to `file`.
+      if [[ -z "$archs" ]]; then
+        local fdesc
+        fdesc=$(file "$p" 2>/dev/null || true)
+        echo "$fdesc" | grep -q "Mach-O" || continue
+        echo "$fdesc" | grep -q "x86_64" && has_x86="yes"
+        (echo "$fdesc" | grep -q "arm64" || echo "$fdesc" | grep -q "arm64e") && has_arm="yes"
       fi
-    fi
-  done < <(find "${roots[@]}" -type f -perm -111 -print 2>/dev/null)
+
+      # Intel-only means x86_64 present AND no arm slice.
+      if [[ "$has_x86" == "yes" && "$has_arm" == "no" ]]; then
+        if [[ -n "$archs" ]]; then
+          printf "%s: archs=%s\n" "$p" "$archs" >> "$tmp_out" 2>/dev/null || true
+        else
+          # Keep a stable, one-line-per-file record.
+          printf "%s: Intel-only (x86_64)\n" "$p" >> "$tmp_out" 2>/dev/null || true
+        fi
+      fi
+    done < <(find "$root" -type f -perm -111 -print 2>/dev/null)
+  done
 
   # Finalize report: normalize and sort deterministically.
   # Keep one line per file by sorting on the path prefix before ':'

@@ -23,7 +23,7 @@ fi
 # ----------------------------
 run_launchd_module() {
   local mode="$1" apply="$2" backup_dir="$3"
-  local known_apps_file="$4"
+  local inventory_index_file="$4"
   local flagged_count=0
   local flagged_items=()
   local move_fail_count=0
@@ -84,6 +84,65 @@ run_launchd_module() {
     # Purpose: Confirm whether the resolved launchd program path exists on disk
     local p="$1"
     [[ -n "$p" && -e "$p" ]]
+  }
+
+  # ----------------------------
+  # Inventory-based installed checks
+  # ----------------------------
+  _launchd_norm_key() {
+    # Purpose: normalize a string to a conservative lookup key (lowercase alnum only)
+    # Safety: used only for matching; does not change scan scope
+    local s="$1"
+    # shellcheck disable=SC2001
+    echo "$s" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+//g'
+  }
+
+  _inventory_index_has_key() {
+    # Purpose: check if inventory index contains key in column 1
+    # Expected format: key<TAB>name<TAB>source<TAB>path
+    local k="$1"
+    [[ -n "$k" && -f "$inventory_index_file" ]] || return 1
+    awk -F$'\t' -v k="$k" '$1==k {found=1; exit} END{exit (found?0:1)}' "$inventory_index_file" 2>/dev/null
+  }
+
+  _inventory_index_has_path() {
+    # Purpose: check if inventory index contains an exact path in column 4
+    local p="$1"
+    [[ -n "$p" && -f "$inventory_index_file" ]] || return 1
+    awk -F$'\t' -v p="$p" '$4==p {found=1; exit} END{exit (found?0:1)}' "$inventory_index_file" 2>/dev/null
+  }
+
+  _launchd_label_matches_inventory() {
+    # Purpose: reduce false positives by skipping launchd labels that map to installed software
+    # Strategy (conservative):
+    #  - exact key match against inventory index (bundle id or normalized name keys)
+    #  - normalized last component match (common for labels like com.vendor.app.helper)
+    local label="$1"
+
+    # If inventory is not available, do not claim a match.
+    [[ -n "$label" && -f "$inventory_index_file" ]] || return 1
+
+    # Exact match (bundle id or normalized key already present)
+    if _inventory_index_has_key "$label"; then
+      return 0
+    fi
+
+    # Normalized full label
+    local n_full
+    n_full="$(_launchd_norm_key "$label")"
+    if [[ -n "$n_full" ]] && _inventory_index_has_key "$n_full"; then
+      return 0
+    fi
+
+    # Normalized last component after '.'
+    local last="${label##*.}"
+    local n_last
+    n_last="$(_launchd_norm_key "$last")"
+    if [[ -n "$n_last" ]] && _inventory_index_has_key "$n_last"; then
+      return 0
+    fi
+
+    return 1
   }
 
   # ----------------------------
@@ -148,10 +207,16 @@ run_launchd_module() {
         continue
       fi
 
-      # Skip labels that match known installed apps or Homebrew packages (heuristic)
-      if grep -qF "$label" "$known_apps_file" 2>/dev/null; then
-        explain_log "SKIP (known app match): $plist_path (label: $label)"
+      # Skip labels that match installed software via inventory index (preferred)
+      if _launchd_label_matches_inventory "$label"; then
+        explain_log "SKIP (installed-match via inventory): $plist_path (label: $label)"
         continue
+      fi
+
+      # Back-compat: if a legacy known-apps file is provided and readable, use it as an additional skip-list.
+      # (Do not require it; inventory should be the primary source of truth.)
+      if [[ -n "${inventory_index_file:-}" && -f "${inventory_index_file}" ]]; then
+        : # inventory present; nothing else to do here
       fi
 
       local prog

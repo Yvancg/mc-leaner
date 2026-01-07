@@ -103,11 +103,43 @@ _brew_sorted_unique_lines() {
 
 _brew_list_formulae() {
   # Purpose: list installed formulae
+  # Inventory integration: if inventory already collected brew formulae, reuse it to reduce brew calls.
+  # Supported env vars (set by inventory/orchestrator):
+  #   - INVENTORY_READY=true
+  #   - INVENTORY_BREW_FORMULAE_FILE=/path/to/file (newline-delimited)
+  #   - INVENTORY_BREW_FORMULAE (newline-delimited)
+  if [[ "${INVENTORY_READY:-false}" == "true" ]]; then
+    if [[ -n "${INVENTORY_BREW_FORMULAE_FILE:-}" && -f "${INVENTORY_BREW_FORMULAE_FILE}" ]]; then
+      cat "${INVENTORY_BREW_FORMULAE_FILE}" 2>/dev/null || true
+      return 0
+    fi
+    if [[ -n "${INVENTORY_BREW_FORMULAE:-}" ]]; then
+      printf "%s\n" "${INVENTORY_BREW_FORMULAE}" | awk 'NF'
+      return 0
+    fi
+  fi
+
   brew list --formula 2>/dev/null || true
 }
 
 _brew_list_casks() {
   # Purpose: list installed casks
+  # Inventory integration: if inventory already collected brew casks, reuse it to reduce brew calls.
+  # Supported env vars (set by inventory/orchestrator):
+  #   - INVENTORY_READY=true
+  #   - INVENTORY_BREW_CASKS_FILE=/path/to/file (newline-delimited)
+  #   - INVENTORY_BREW_CASKS (newline-delimited)
+  if [[ "${INVENTORY_READY:-false}" == "true" ]]; then
+    if [[ -n "${INVENTORY_BREW_CASKS_FILE:-}" && -f "${INVENTORY_BREW_CASKS_FILE}" ]]; then
+      cat "${INVENTORY_BREW_CASKS_FILE}" 2>/dev/null || true
+      return 0
+    fi
+    if [[ -n "${INVENTORY_BREW_CASKS:-}" ]]; then
+      printf "%s\n" "${INVENTORY_BREW_CASKS}" | awk 'NF'
+      return 0
+    fi
+  fi
+
   brew list --cask 2>/dev/null || true
 }
 
@@ -132,80 +164,50 @@ _brew_outdated_casks() {
   brew outdated --cask 2>/dev/null || true
 }
 
-_brew_versions_for_formula() {
-  # Purpose: list installed versions for a formula (best-effort)
-  # Inputs: formula name
-  local f="$1"
+_brew_top_n_largest_formulae() {
+  # Purpose: print top N largest formulae by Cellar size
+  # Inputs: N
+  # Performance: single-pass scan of Cellar/* instead of one `du` per formula.
+  local n="${1:-10}"
 
-  # Homebrew prints: <formula>: <version> [<version> ...]
-  # If not supported, fall back to cellar directories.
-  local out
-  out=$(brew list --versions "$f" 2>/dev/null || true)
-  if [[ -n "$out" ]]; then
-    echo "$out" | awk '{ $1=""; sub(/^ /, ""); print }'
-    return 0
-  fi
-
-  # Fallback: inspect Cellar folder
   local prefix
   prefix="$(_brew_prefix)"
   [[ -n "$prefix" ]] || return 0
 
-  local cellar="$prefix/Cellar/$f"
+  local cellar="$prefix/Cellar"
   [[ -d "$cellar" ]] || return 0
-
-  ls -1 "$cellar" 2>/dev/null | _brew_sorted_unique_lines
-}
-
-_brew_formula_size_mb() {
-  # Purpose: compute total size for a formula across installed versions
-  # Inputs: formula name
-  local f="$1"
-
-  local prefix
-  prefix="$(_brew_prefix)"
-  [[ -n "$prefix" ]] || { echo "0"; return 0; }
-
-  local cellar="$prefix/Cellar/$f"
-  [[ -d "$cellar" ]] || { echo "0"; return 0; }
-
-  _brew_dir_mb "$cellar"
-}
-
-_brew_top_n_largest_formulae() {
-  # Purpose: print top N largest formulae by Cellar size
-  # Inputs: N
-  local n="${1:-10}"
-
-  local formulae
-  formulae="$(_brew_list_formulae)"
-  [[ -n "$formulae" ]] || return 0
 
   local tmp
   tmp="$(tmpfile)"
   : > "$tmp"
 
-  echo "$formulae" | while IFS= read -r f; do
+  # `du -sk Cellar/*` yields: <kb> <path>
+  # Convert to MB and capture the formula name from the directory basename.
+  du -sk "$cellar"/* 2>/dev/null | while IFS=$'\t' read -r kb p; do
+    [[ -n "${kb:-}" && -n "${p:-}" ]] || continue
+    local f
+    f="$(basename "$p" 2>/dev/null || echo "")"
     [[ -n "$f" ]] || continue
     local mb
-    mb="$(_brew_formula_size_mb "$f")"
+    mb="$(_brew_kb_to_mb "$kb")"
     printf "%s|%s\n" "$mb" "$f" >> "$tmp"
   done
 
-  while IFS='|' read -r mb f; do
+  # Sort by size desc and print top N.
+  sort -t '|' -k1,1nr "$tmp" 2>/dev/null | head -n "$n" | while IFS='|' read -r mb f; do
     [[ -n "$f" ]] || continue
 
+    # Versions: avoid `brew` calls; list version directories under Cellar/<formula>.
     local versions
-    versions="$(_brew_versions_for_formula "$f")"
-    # Collapse versions to one line
+    versions=$(ls -1 "$cellar/$f" 2>/dev/null | _brew_sorted_unique_lines || true)
     versions=$(echo "$versions" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g' | sed -E 's/[[:space:]]+$//')
 
     log "BREW SIZE: ${f} | ${mb}MB | versions: ${versions:-unknown}"
     BREW_TOP_SIZES+=("${f}|${mb}|${versions:-unknown}")
     if [[ "${EXPLAIN:-false}" == "true" ]]; then
-      explain_log "  source: Cellar size (best-effort)"
+      explain_log "  source: Cellar size (single-pass scan)"
     fi
-  done < <(sort -t '|' -k1,1nr "$tmp" 2>/dev/null | head -n "$n")
+  done
 }
 
 _brew_cache_downloads_summary() {
@@ -295,6 +297,21 @@ run_brew_module() {
   fi
 
   log "Homebrew: scanning installation (inspection-first)..."
+
+  if [[ "${EXPLAIN:-false}" == "true" ]]; then
+    if [[ "${INVENTORY_READY:-false}" == "true" ]]; then
+      if [[ -n "${INVENTORY_BREW_FORMULAE_FILE:-}" || -n "${INVENTORY_BREW_FORMULAE:-}" ]]; then
+        explain_log "Inventory (brew): using inventory-provided formula list"
+      else
+        explain_log "Inventory (brew): no formula list provided; using brew list"
+      fi
+      if [[ -n "${INVENTORY_BREW_CASKS_FILE:-}" || -n "${INVENTORY_BREW_CASKS:-}" ]]; then
+        explain_log "Inventory (brew): using inventory-provided cask list"
+      else
+        explain_log "Inventory (brew): no cask list provided; using brew list"
+      fi
+    fi
+  fi
 
   local formulae
   local casks

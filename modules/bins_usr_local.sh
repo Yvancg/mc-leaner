@@ -1,6 +1,6 @@
 #!/bin/bash
 # mc-leaner: /usr/local/bin inspection module
-# Purpose: Heuristically identify unmanaged binaries in /usr/local/bin and optionally relocate them to backups
+# Purpose: Heuristically identify unmanaged binaries in /usr/local/bin (using Inventory to reduce false positives) and optionally relocate them to backups
 # Safety: Defaults to dry-run; never deletes; moves require explicit `--apply` and per-item confirmation
 
 set -euo pipefail
@@ -11,7 +11,7 @@ set -euo pipefail
 
 run_bins_module() {
   local mode="$1" apply="$2" backup_dir="$3"
-  local brew_formulae_file="$4"
+  local inventory_index_file="${4:-}"
 
   # ----------------------------
   # Target directory
@@ -23,6 +23,21 @@ run_bins_module() {
   fi
 
   # ----------------------------
+  # Inventory (optional): build quick membership set
+  # ----------------------------
+  local inv_keys_file=""
+  if [[ -n "$inventory_index_file" && -s "$inventory_index_file" ]]; then
+    inv_keys_file="$(mktemp -t mc-leaner_bins_invkeys.XXXXXX)"
+    # inventory index format: key<TAB>name<TAB>source<TAB>path
+    cut -f1 "$inventory_index_file" | LC_ALL=C sort -u > "$inv_keys_file" || true
+  fi
+
+  # Ensure temp file cleanup
+  if [[ -n "$inv_keys_file" ]]; then
+    trap 'rm -f "$inv_keys_file" 2>/dev/null || true' RETURN
+  fi
+
+  # ----------------------------
   # Heuristic scan
   # ----------------------------
   local found=0
@@ -30,6 +45,9 @@ run_bins_module() {
   local flagged_items=()
   local move_failures=()
   log "Checking $dir for orphaned binaries (heuristic)..."
+  if [[ -z "$inv_keys_file" ]]; then
+    log "Bins: inventory index not provided; falling back to heuristics only (may increase false positives)."
+  fi
   for bin_path in "$dir"/*; do
     [[ -x "$bin_path" ]] || continue
     local base
@@ -82,8 +100,10 @@ run_bins_module() {
         ;;
     esac
 
-    # Skip binaries that appear to be managed by Homebrew (reduces false positives for CLI tools)
-    if [[ -s "$brew_formulae_file" ]] && grep -qF "$base" "$brew_formulae_file"; then
+    # Skip binaries that are known to be installed (brew formula/cask keys and app-derived keys)
+    # Note: This is a best-effort guard; later we can add pkg receipts vs standalone binary detection.
+    if [[ -n "$inv_keys_file" ]] && grep -qxF "$base" "$inv_keys_file"; then
+      log "SKIP (inventory match): $bin_path (key=$base)"
       continue
     fi
 

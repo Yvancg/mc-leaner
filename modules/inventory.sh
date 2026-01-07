@@ -19,6 +19,10 @@ INVENTORY_FILE=""
 INVENTORY_INDEX_FILE=""
 INVENTORY_READY="false"
 
+# Optional derived index: list of Homebrew-provided executable basenames (from prefix/bin + prefix/sbin).
+INVENTORY_BREW_BINS_FILE=""
+INVENTORY_BREW_BINS_READY="false"
+
 # Optional in-memory cache for inventory lookups (only if bash supports associative arrays).
 INVENTORY_CACHE_READY="false"
 # Keys are inventory index keys; values are the full hit line: name\tsource\tapp_path
@@ -226,6 +230,80 @@ _inventory_scan_brew() {
     _inventory_add_index "brew:cask:$c" "$c" "brew" ""
   done < <(brew list --cask 2>/dev/null || true)
 }
+_inventory_build_brew_bins() {
+  # Build a fast membership list for other modules (e.g. /usr/local/bin heuristics).
+  # Output: one executable basename per line, sorted unique (LC_ALL=C).
+
+  INVENTORY_BREW_BINS_READY="false"
+  INVENTORY_BREW_BINS_FILE=""
+
+  if ! _inventory_have_brew; then
+    return 0
+  fi
+
+  local prefix=""
+  prefix="$(brew --prefix 2>/dev/null || true)"
+  if [[ -z "$prefix" ]]; then
+    _inventory_debug "brew present but prefix could not be determined; skipping brew bins"
+    return 0
+  fi
+
+  local tmp=""
+  tmp="$(_inventory_tmpfile)"
+  if [[ -z "$tmp" || ! -e "$tmp" ]]; then
+    return 0
+  fi
+  : > "$tmp"
+
+  local d
+  for d in "$prefix/bin" "$prefix/sbin"; do
+    [[ -d "$d" ]] || continue
+
+    # Enumerate only top-level executables (regular files or symlinks) to keep this fast.
+    # Use -L to follow symlinks for permission checks; suppress permission errors.
+    while IFS= read -r -d '' p; do
+      local b
+      b="$(basename "$p")"
+      [[ -n "$b" ]] && printf '%s\n' "$b" >> "$tmp"
+    done < <(find -L "$d" -maxdepth 1 \( -type f -o -type l \) -perm -111 -print0 2>/dev/null)
+  done
+
+  # If nothing collected, keep vars unset/false.
+  local rows
+  rows="$(awk 'END{print NR+0}' "$tmp" 2>/dev/null || echo 0)"
+  if [[ "$rows" -le 0 ]]; then
+    rm -f "$tmp" 2>/dev/null || true
+    return 0
+  fi
+
+  # Sort unique, locale-stable.
+  local out=""
+  out="$(_inventory_tmpfile)"
+  if [[ -z "$out" || ! -e "$out" ]]; then
+    rm -f "$tmp" 2>/dev/null || true
+    return 0
+  fi
+
+  if ! LC_ALL=C sort -u "$tmp" > "$out" 2>/dev/null; then
+    rm -f "$tmp" "$out" 2>/dev/null || true
+    return 0
+  fi
+
+  rm -f "$tmp" 2>/dev/null || true
+
+  local final_rows
+  final_rows="$(awk 'END{print NR+0}' "$out" 2>/dev/null || echo 0)"
+  if [[ "$final_rows" -le 0 ]]; then
+    rm -f "$out" 2>/dev/null || true
+    return 0
+  fi
+
+  INVENTORY_BREW_BINS_FILE="$out"
+  INVENTORY_BREW_BINS_READY="true"
+
+  _inventory_debug "brew bins: ready=true entries=$final_rows file=$INVENTORY_BREW_BINS_FILE"
+  return 0
+}
 
 _inventory_dedupe_index_file() {
   # Deduplicate INVENTORY_INDEX_FILE in-place.
@@ -298,6 +376,7 @@ inventory_build() {
 
   # Homebrew
   _inventory_scan_brew
+  _inventory_build_brew_bins
   _inventory_dedupe_index_file
 
   # Summaries
@@ -314,6 +393,7 @@ inventory_build() {
 
   INVENTORY_READY="true"
   export INVENTORY_FILE INVENTORY_INDEX_FILE INVENTORY_READY INVENTORY_CACHE_READY
+  export INVENTORY_BREW_BINS_FILE INVENTORY_BREW_BINS_READY
   return 0
 }
 
@@ -441,5 +521,6 @@ run_inventory_module() {
     inv_items="$(awk 'END{print NR+0}' "$INVENTORY_FILE" 2>/dev/null || echo 0)"
     summary_set "inventory" "ready" "$INVENTORY_READY"
     summary_set "inventory" "items" "$inv_items"
+    summary_set "inventory" "brew_bins_ready" "${INVENTORY_BREW_BINS_READY}"
   fi
 }

@@ -222,10 +222,12 @@ run_leftovers_module() {
   local backup_dir="$2"
   local explain="${3:-false}"
   local inventory_file="${4:-}"
+  local inventory_index_file="${5:-${INVENTORY_INDEX_FILE:-}}"
 
   log "Leftovers: scanning user-level support locations (inspection-first)..."
   if [[ "$explain" == "true" ]]; then
     explain_log "Leftovers (explain): using inventory file: ${inventory_file}"
+    explain_log "Leftovers (explain): using inventory index file: ${inventory_index_file:-<none>}"
   fi
 
   LEFTOVERS_FLAGGED_COUNT=0
@@ -242,6 +244,36 @@ run_leftovers_module() {
     return 0
   fi
 
+  # If the inventory index file is missing, build a minimal one locally.
+  # Format: key<TAB>name<TAB>source<TAB>path
+  # Keys:
+  # - bundle id (if present)
+  # - normalized app name (lowercase alnum)
+  # This keeps leftovers resilient even if mc-leaner.sh only passes inventory_file.
+  local inventory_index_tmp=""
+  if [[ -z "${inventory_index_file}" || ! -f "${inventory_index_file}" ]]; then
+    inventory_index_tmp="$(mktemp -t mcleaner_inventory_index.XXXXXX)"
+
+    awk -F'\t' '
+      ($1=="app"){
+        src=$2; name=$3; bid=$4; path=$5;
+        if(bid!="") print bid "\t" name "\t" src "\t" path;
+        key=name;
+        gsub(/[^A-Za-z0-9]/,"",key);
+        key=tolower(key);
+        if(key!="") print key "\t" name "\t" src "\t" path;
+      }
+    ' "${inventory_file}" | sort -u > "${inventory_index_tmp}" || true
+
+    inventory_index_file="${inventory_index_tmp}"
+
+    if [[ "${explain}" == "true" ]]; then
+      local _ix
+      _ix=$(wc -l < "${inventory_index_file}" 2>/dev/null || echo "0")
+      explain_log "Leftovers (explain): built fallback inventory index: ${_ix} lines"
+    fi
+  fi
+
   # Optional allowlist: exact paths to treat as eligible leftovers (inspection-first, reversible).
   local repo_root
   repo_root="$(_leftovers_repo_root)"
@@ -254,40 +286,17 @@ run_leftovers_module() {
     fi
   fi
 
-  # Additional fallback keys derived from installed apps.
-  # This helps avoid false positives when container/group folder names don't exactly match a bundle id.
-  # Keys are normalized to lowercase alnum only, e.g. "WhatsApp" -> "whatsapp", "com.tdesktop.Telegram" -> "comtdesktoptelegram".
-  local installed_bundle_ids_file
-  installed_bundle_ids_file="$(mktemp -t mcleaner_installed_bundle_ids.XXXXXX)"
+  # Build a normalized key set from the inventory index for fast installed checks.
+  # We store only column 1 (key) as exact-match candidates.
+  local installed_index_keys_file
+  installed_index_keys_file="$(mktemp -t mcleaner_installed_index_keys.XXXXXX)"
 
-  local installed_keys_file
-  installed_keys_file="$(mktemp -t mcleaner_installed_app_keys.XXXXXX)"
-
-  # Bundle IDs (exact/prefix match path)
-  awk -F'\t' '($1=="app" && $4!=""){print $4}' "$inventory_file" \
-    | sort -u > "$installed_bundle_ids_file"
-
-  # Normalized keys from app names and bundle IDs (fallback path)
-  awk -F'\t' '
-    ($1=="app"){
-      name=$3; bid=$4;
-      gsub(/[^A-Za-z0-9]/,"",name);
-      gsub(/[^A-Za-z0-9]/,"",bid);
-      name=tolower(name);
-      bid=tolower(bid);
-      if(name!="") print name;
-      if(bid!="") print bid;
-    }
-  ' "$inventory_file" | sort -u > "$installed_keys_file"
+  awk -F'\t' '{print $1}' "${inventory_index_file}" 2>/dev/null | sed '/^$/d' | sort -u > "${installed_index_keys_file}" || true
 
   if [[ "$explain" == "true" ]]; then
-    local _n
-    _n=$(wc -l < "$installed_bundle_ids_file" 2>/dev/null || echo "0")
-    explain_log "Leftovers (explain): installed app bundle IDs loaded: ${_n}"
-
     local _k
-    _k=$(wc -l < "$installed_keys_file" 2>/dev/null || echo "0")
-    explain_log "Leftovers (explain): installed app fallback keys loaded: ${_k}"
+    _k=$(wc -l < "${installed_index_keys_file}" 2>/dev/null || echo "0")
+    explain_log "Leftovers (explain): installed inventory keys loaded: ${_k}"
   fi
 
   local targets=()
@@ -311,14 +320,15 @@ run_leftovers_module() {
       prefs_report_only="true"
     fi
 
-    if _leftovers_scan_target "$t" "$prefs_report_only" "$min_mb" "$apply" "$backup_dir" "$explain" "$installed_bundle_ids_file" "$installed_keys_file" "$allowlist_file"; then
+    if _leftovers_scan_target "$t" "$prefs_report_only" "$min_mb" "$apply" "$backup_dir" "$explain" "$installed_index_keys_file" "$allowlist_file"; then
       found_any="true"
     fi
   done
 
   if [[ "$found_any" != "true" || "${LEFTOVERS_FLAGGED_COUNT}" -eq 0 ]]; then
     log "Leftovers: no large leftovers found (by heuristics)."
-    rm -f "$installed_bundle_ids_file" "$installed_keys_file" 2>/dev/null || true
+    rm -f "${installed_index_keys_file:-}" 2>/dev/null || true
+    rm -f "${inventory_index_tmp:-}" 2>/dev/null || true
     _leftovers_summary_emit
     return 0
   fi
@@ -340,7 +350,8 @@ run_leftovers_module() {
   fi
 
   log "Leftovers: run with --apply to relocate selected leftovers (user-confirmed, reversible)."
-  rm -f "$installed_bundle_ids_file" "$installed_keys_file" 2>/dev/null || true
+  rm -f "${installed_index_keys_file:-}" 2>/dev/null || true
+  rm -f "${inventory_index_tmp:-}" 2>/dev/null || true
   _leftovers_summary_emit
 }
 
@@ -355,9 +366,8 @@ _leftovers_scan_target() {
   local apply="$4"
   local backup_dir="$5"
   local explain="$6"
-  local installed_bundle_ids_file="$7"
-  local installed_keys_file="$8"
-  local allowlist_file="${9:-}"
+  local installed_index_keys_file="$7"
+  local allowlist_file="${8:-}"
 
   if [[ "$explain" == "true" ]]; then
     explain_log "Leftovers (explain): scanning ${target_dir}"
@@ -448,7 +458,7 @@ _leftovers_scan_target() {
 
     # Installed-match rule: if the folder name can be linked to an installed app, skip.
     # This handles Team ID prefixes and group container sub-identifiers.
-    if [[ "$is_allowlisted" != "true" ]] && _leftovers_matches_installed "$base" "$installed_bundle_ids_file" "$installed_keys_file"; then
+    if [[ "$is_allowlisted" != "true" ]] && _leftovers_matches_installed "$base" "$installed_index_keys_file"; then
       if [[ "$explain" == "true" && "$explain_skips" == "true" ]]; then
         explain_log "Leftovers: skip (installed-match): ${base}"
       fi
@@ -525,79 +535,61 @@ _leftovers_strip_team_prefix() {
 
 _leftovers_matches_installed() {
   # Returns 0 (true) when the owner/folder name can be linked to an installed app.
-  # Primary check: bundle-id exact/prefix matches against installed bundle IDs.
-  # Fallback check: normalized key matches against installed app name/bundle-id derived keys.
-  # This fallback is intentionally conservative and exists mainly to reduce false positives.
+  # Uses inventory-derived keys (bundle ids + normalized app name keys) for exact matching.
+  # This is intentionally conservative: exact key matches only.
   local raw="$1"
-  local known_bundle_ids_file="$2"
-  local installed_keys_file="${3:-}"
+  local installed_index_keys_file="$2"
 
-  [[ -f "$known_bundle_ids_file" ]] || return 1
+  [[ -f "$installed_index_keys_file" ]] || return 1
 
   local s
   s="$(_leftovers_strip_team_prefix "$raw")"
 
-  # 1) Exact bundle id match
-  if grep -qFx -- "$s" "$known_bundle_ids_file" 2>/dev/null; then
+  # Candidate keys:
+  # - full bundle-like id (as-is)
+  # - strip group. prefix
+  # - full normalized (alnum lower)
+  # - last segment normalized (e.g. Telegram)
+  # - previous segment normalized (e.g. WhatsApp in net.whatsapp.WhatsApp.shared)
+  local cand
+
+  # 1) Direct id match
+  if [[ -n "$s" ]] && grep -qFx -- "$s" "$installed_index_keys_file" 2>/dev/null; then
     return 0
   fi
 
-  # 2) Prefix match for sub-identifiers (e.g. com.getdropbox.dropbox.sync)
-  local id
-  while IFS= read -r id || [[ -n "$id" ]]; do
-    [[ -z "$id" ]] && continue
-    if [[ "$s" == "$id".* ]]; then
-      return 0
-    fi
-  done < "$known_bundle_ids_file"
-
-  # 3) Group containers: strip "group." and try again (exact + prefix)
+  # 2) Strip group. prefix and try direct
   if [[ "$s" == group.* ]]; then
     local remainder
     remainder="${s#group.}"
-
-    if grep -qFx -- "$remainder" "$known_bundle_ids_file" 2>/dev/null; then
+    if [[ -n "$remainder" ]] && grep -qFx -- "$remainder" "$installed_index_keys_file" 2>/dev/null; then
       return 0
     fi
-
-    while IFS= read -r id || [[ -n "$id" ]]; do
-      [[ -z "$id" ]] && continue
-      if [[ "$remainder" == "$id".* ]]; then
-        return 0
-      fi
-    done < "$known_bundle_ids_file"
-
-    # Keep using the remainder for fallback key generation.
     s="$remainder"
   fi
 
-  # 4) Fallback key match (name/bundle-id derived keys from inventory)
-  if [[ -n "$installed_keys_file" && -f "$installed_keys_file" ]]; then
-    # Candidate keys from the folder name:
-    # - last segment after dot (often app name)
-    # - second-last segment (covers group containers like net.whatsapp.WhatsApp.shared)
-    # - full string (bundle-like)
-    local full_key last_seg prev_seg
+  # 3) Normalized full key
+  cand="$(echo "$s" | tr -cd '[:alnum:]' | tr '[:upper:]' '[:lower:]' 2>/dev/null || echo "$s")"
+  if [[ -n "$cand" ]] && grep -qFx -- "$cand" "$installed_index_keys_file" 2>/dev/null; then
+    return 0
+  fi
 
-    full_key="$(echo "$s" | tr -cd '[:alnum:]' | tr '[:upper:]' '[:lower:]' 2>/dev/null || echo "$s")"
+  # 4) Last segment normalized
+  local last_seg
+  last_seg="${s##*.}"
+  last_seg="$(echo "$last_seg" | tr -cd '[:alnum:]' | tr '[:upper:]' '[:lower:]' 2>/dev/null || echo "$last_seg")"
+  if [[ -n "$last_seg" ]] && grep -qFx -- "$last_seg" "$installed_index_keys_file" 2>/dev/null; then
+    return 0
+  fi
 
-    last_seg="${s##*.}"
-    last_seg="$(echo "$last_seg" | tr -cd '[:alnum:]' | tr '[:upper:]' '[:lower:]' 2>/dev/null || echo "$last_seg")"
-
-    prev_seg=""
-    if echo "$s" | grep -q '\.'; then
-      prev_seg="${s%.*}"
-      prev_seg="${prev_seg##*.}"
-      prev_seg="$(echo "$prev_seg" | tr -cd '[:alnum:]' | tr '[:upper:]' '[:lower:]' 2>/dev/null || echo "$prev_seg")"
-    fi
-
-    if [[ -n "$full_key" ]] && grep -qFx -- "$full_key" "$installed_keys_file" 2>/dev/null; then
-      return 0
-    fi
-    if [[ -n "$last_seg" ]] && grep -qFx -- "$last_seg" "$installed_keys_file" 2>/dev/null; then
-      return 0
-    fi
-    if [[ -n "$prev_seg" ]] && grep -qFx -- "$prev_seg" "$installed_keys_file" 2>/dev/null; then
+  # 5) Previous segment normalized
+  local prev_seg
+  prev_seg=""
+  if echo "$s" | grep -q '\.'; then
+    prev_seg="${s%.*}"
+    prev_seg="${prev_seg##*.}"
+    prev_seg="$(echo "$prev_seg" | tr -cd '[:alnum:]' | tr '[:upper:]' '[:lower:]' 2>/dev/null || echo "$prev_seg")"
+    if [[ -n "$prev_seg" ]] && grep -qFx -- "$prev_seg" "$installed_index_keys_file" 2>/dev/null; then
       return 0
     fi
   fi

@@ -180,6 +180,13 @@ _inventory_scan_apps_root() {
 
     _inventory_add_row "app" "$effective_source" "$name" "$bid" "$app" ""
 
+    # Also index app bundle paths (both visible and resolved target) so modules can
+    # resolve ownership from concrete filesystem locations without schema changes.
+    _inventory_add_index "path:$app" "$name" "$effective_source" "$app"
+    if [[ -n "$target" && "$target" != "$app" ]]; then
+      _inventory_add_index "path:$target" "$name" "$effective_source" "$app"
+    fi
+
     # Index keys
     if [[ -n "$bid" ]]; then
       _inventory_add_index "$bid" "$name" "$effective_source" "$app"

@@ -104,11 +104,22 @@ _leftovers_repo_root() {
 
 
 _leftovers_expand_path() {
-  # Expand ~ and environment variables in a path string.
+  # Expand a limited set of tokens in a path string.
+  # Safety: avoid `eval` so allowlist parsing cannot execute arbitrary code.
+  # Supported expansions:
+  # - Leading `~`
+  # - `$HOME`
+  # - `${HOME}`
   local raw="$1"
+
+  # Leading ~
   raw="${raw/#\~/$HOME}"
-  # shellcheck disable=SC2086
-  eval "printf '%s' \"$raw\""
+
+  # $HOME and ${HOME} anywhere in the string
+  raw="${raw//\$HOME/$HOME}"
+  raw="${raw//\$\{HOME\}/$HOME}"
+
+  printf '%s' "$raw"
 }
 
 # Confirm a move in a safe, dependency-tolerant way.

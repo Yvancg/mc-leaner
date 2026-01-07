@@ -33,6 +33,14 @@ run_caches_module() {
 
   log "Caches: scanning user-level cache locations (min ${min_mb}MB)..."
 
+  if [[ "${EXPLAIN:-false}" == "true" ]]; then
+    if _inventory_ready; then
+      explain_log "Caches (explain): inventory index available; owner labels will prefer inventory lookups"
+    else
+      explain_log "Caches (explain): inventory index not available; owner labels will use folder naming/Spotlight heuristics"
+    fi
+  fi
+
   # ----------------------------
   # Helper: size and timestamps (macOS compatible)
   # ----------------------------
@@ -48,14 +56,120 @@ run_caches_module() {
     [[ -n "$epoch" ]] && date -r "$epoch" +"%Y-%m-%d %H:%M:%S" || echo "unknown"
   }
 
+  _inventory_ready() {
+    [[ "${INVENTORY_READY:-false}" == "true" ]] && [[ -n "${INVENTORY_INDEX_FILE:-}" ]] && [[ -f "${INVENTORY_INDEX_FILE:-}" ]]
+  }
+
+  _norm_key() {
+    # Lowercase and remove non-alphanumerics for loose matching (matches inventory normalized keys)
+    # Example: "Google Drive" -> "googledrive"; "group.is.workflow.shortcuts" -> "groupisworkflowshortcuts"
+    echo "$1" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9'
+  }
+
+  _inventory_lookup() {
+    # Usage: _inventory_lookup <key>
+    # Index format (expected): key<TAB>name<TAB>source<TAB>path
+    # Defensive: tolerate variable field counts.
+    local key="$1"
+
+    _inventory_ready || return 1
+
+    # Safe exact-key match (case-insensitive) without regex pitfalls.
+    # Prints: "Name (src)|path" when available, else best-effort.
+    awk -F'\t' -v k="$key" 'BEGIN{IGNORECASE=1}
+      $1==k {
+        name=($2!=""?$2:"");
+        src=($3!=""?$3:"");
+        path=($4!=""?$4:"");
+        if (name!="" && path!="") { print name " (" src ")|" path; exit }
+        if (name!="") { print name; exit }
+        print $0; exit
+      }
+    ' "${INVENTORY_INDEX_FILE}" 2>/dev/null
+  }
+
+  _inventory_label_from_bundle_id() {
+    # Try bundle id as-is and also common transforms for Group Containers/team-id prefixes
+    local bid="$1"
+    local key out
+
+    [[ -n "$bid" ]] || return 1
+
+    # 1) direct bundle id key
+    key="$bid"
+    if out="$(_inventory_lookup "$key" 2>/dev/null)"; then
+      echo "$out"
+      return 0
+    fi
+
+    # 2) strip leading TEAMID. (e.g., EQHXZ8M8AV.group.com.google.drivefs -> group.com.google.drivefs)
+    if [[ "$bid" =~ ^[A-Z0-9]{10}\.(.+)$ ]]; then
+      key="${BASH_REMATCH[1]}"
+      if out="$(_inventory_lookup "$key" 2>/dev/null)"; then
+        echo "$out"
+        return 0
+      fi
+    fi
+
+    # 3) strip group. prefix (common for group containers)
+    if [[ "$bid" =~ ^group\.(.+)$ ]]; then
+      key="${BASH_REMATCH[1]}"
+      if out="$(_inventory_lookup "$key" 2>/dev/null)"; then
+        echo "$out"
+        return 0
+      fi
+    fi
+
+    return 1
+  }
+
+  _inventory_label_from_name() {
+    # Try normalized name key (e.g., "Google" -> "google")
+    local name="$1"
+    local key out
+    [[ -n "$name" ]] || return 1
+
+    key="$(_norm_key "$name")"
+    [[ -n "$key" ]] || return 1
+
+    if out="$(_inventory_lookup "$key" 2>/dev/null)"; then
+      echo "$out"
+      return 0
+    fi
+
+    return 1
+  }
+
   _guess_owner_app() {
-    # Purpose: best-effort mapping from cache folder naming to an owning app identifier
+    # Purpose: map a cache directory to an owning app label using Inventory when possible
+    # Returns a human label suitable for logs. Does not perform any writes.
     local p="$1"
-    local base
+    local base out
     base="$(basename "$p")"
 
-    # Common pattern: bundle identifier (com.vendor.app)
+    # 1) Container cache pattern: ~/Library/Containers/<bundle-id>/Data/Library/Caches
+    if [[ "$p" == *"/Library/Containers/"*"/Data/Library/Caches"* ]]; then
+      local cid
+      cid="$(echo "$p" | awk -F'/Library/Containers/' '{print $2}' | awk -F'/' '{print $1}')"
+      if [[ -n "$cid" ]]; then
+        if out="$(_inventory_label_from_bundle_id "$cid" 2>/dev/null)"; then
+          # If inventory returns "Name (src)|path", keep only the name portion for compact logs
+          echo "$out" | awk -F'\|' '{print $1}'
+          return 0
+        fi
+        echo "$cid"
+        return 0
+      fi
+    fi
+
+    # 2) Bundle-id looking folder name under ~/Library/Caches (com.vendor.app)
     if [[ "$base" == *.*.* ]]; then
+      if out="$(_inventory_label_from_bundle_id "$base" 2>/dev/null)"; then
+        echo "$out" | awk -F'\|' '{print $1}'
+        return 0
+      fi
+
+      # Fallback: Spotlight lookup (slower; avoid unless necessary)
       local hit=""
       if is_cmd mdfind; then
         hit="$(mdfind "kMDItemCFBundleIdentifier == '$base'" 2>/dev/null | head -n 1 || true)"
@@ -64,17 +178,18 @@ run_caches_module() {
         echo "$(basename "$hit" .app) ($base)"
         return 0
       fi
+
       echo "$base"
       return 0
     fi
 
-    # Container path pattern: ~/Library/Containers/<bundle-id>/...
-    if [[ "$p" == *"/Library/Containers/"*"/Data/Library/Caches"* ]]; then
-      local cid
-      cid="$(echo "$p" | awk -F'/Library/Containers/' '{print $2}' | awk -F'/' '{print $1}')"
-      [[ -n "$cid" ]] && echo "$cid" && return 0
+    # 3) Non bundle-id folder name (e.g. Google, Chrome, Microsoft). Try inventory normalized name.
+    if out="$(_inventory_label_from_name "$base" 2>/dev/null)"; then
+      echo "$out" | awk -F'\|' '{print $1}'
+      return 0
     fi
 
+    # 4) Default: folder basename
     echo "$base"
   }
 
@@ -89,14 +204,26 @@ run_caches_module() {
   local below_report_file
   below_report_file="$(tmpfile)"
 
+  # Collect candidates as "kb<TAB>path" so we can de-dup safely later.
+  local candidate_list_file
+  candidate_list_file="$(tmpfile)"
+
+  # Best-effort cleanup of temp files created by this module.
+  _caches_cleanup_tmp() {
+    rm -f "$below_report_file" "$candidate_list_file" \
+      "${report_file:-}" "${report_file:-}.sorted" 2>/dev/null || true
+  }
+  trap _caches_cleanup_tmp EXIT
+
   # ----------------------------
   # Batch size scan (much faster than per-dir du)
   # ----------------------------
 
-  # Target 1: ~/Library/Caches/* (one level)
+  # Target 1: ~/Library/Caches (one level children)
   if [[ -d "$home/Library/Caches" ]]; then
-    explain_log "Caches (explain): sizing ~/Library/Caches/*"
+    explain_log "Caches (explain): sizing ~/Library/Caches (one level)"
 
+    # Avoid glob expansion (can hit arg limits on large systems).
     # du output: <kb>\t<path>
     while IFS=$'\t' read -r kb d; do
       [[ -n "$kb" && -n "$d" ]] || continue
@@ -106,13 +233,14 @@ run_caches_module() {
       local mb=$((kb / 1024))
 
       if (( mb >= min_mb )); then
-        candidates+=("$d")
-        over_threshold=$((over_threshold + 1))
+        printf "%s\t%s\n" "$kb" "$d" >>"$candidate_list_file"
       else
         # Track below-threshold items for --explain diagnostics (size|path)
         printf "%s|%s\n" "$mb" "$d" >>"$below_report_file"
       fi
-    done < <(du -sk "$home/Library/Caches"/* 2>/dev/null || true)
+    done < <(
+      find "$home/Library/Caches" -mindepth 1 -maxdepth 1 -type d -exec du -sk {} + 2>/dev/null || true
+    )
   fi
 
   # Target 2: ~/Library/Containers/*/Data/Library/Caches (batched)
@@ -127,23 +255,38 @@ run_caches_module() {
       local mb=$((kb / 1024))
 
       if (( mb >= min_mb )); then
-        candidates+=("$d")
-        over_threshold=$((over_threshold + 1))
+        printf "%s\t%s\n" "$kb" "$d" >>"$candidate_list_file"
       else
         # Track below-threshold items for --explain diagnostics (size|path)
         printf "%s|%s\n" "$mb" "$d" >>"$below_report_file"
       fi
     done < <(
-      find "$home/Library/Containers" -maxdepth 3 -type d -path "*/Data/Library/Caches" -print0 2>/dev/null \
-        | xargs -0 du -sk 2>/dev/null || true
+      find "$home/Library/Containers" -maxdepth 3 -type d -path "*/Data/Library/Caches" -exec du -sk {} + 2>/dev/null || true
     )
   fi
 
   explain_log "Caches (explain): sizing complete"
 
+  # De-dup candidate paths (same cache dir may be discovered via multiple roots).
+  local candidates_kb_path
+  candidates_kb_path="$(tmpfile)"
+
+  if [[ -s "$candidate_list_file" ]]; then
+    # Sort by path (2nd field) then keep first occurrence per path.
+    sort -t$'\t' -k2,2 "$candidate_list_file" 2>/dev/null \
+      | awk -F'\t' '!seen[$2]++ {print $0}' >"$candidates_kb_path" || true
+  fi
+
+  # Recompute over_threshold based on unique candidates.
+  over_threshold=0
+  if [[ -s "$candidates_kb_path" ]]; then
+    over_threshold="$(wc -l <"$candidates_kb_path" | tr -d ' ')"
+  fi
+
+  # Update the log line to reflect unique candidates.
   log "Caches: scanned ${scanned_dirs} directories; found ${over_threshold} >= ${min_mb}MB."
 
-  if [[ "${#candidates[@]}" -eq 0 ]]; then
+  if [[ ! -s "${candidates_kb_path:-}" ]]; then
     log "Caches: no directories >= ${min_mb}MB found (by heuristics)."
 
     if [[ "${EXPLAIN:-false}" == "true" ]]; then
@@ -166,16 +309,18 @@ run_caches_module() {
   report_file="$(tmpfile)"
   local moved_count=0
 
-  for d in "${candidates[@]}"; do
-    local kb mb mod owner
-    kb="$(_du_kb "$d")"
+  while IFS=$'\t' read -r kb d; do
+    [[ -n "$kb" && -n "$d" ]] || continue
+    [[ -d "$d" ]] || continue
+
+    local mb mod owner
     mb=$((kb / 1024))
     mod="$(_mtime "$d")"
     owner="$(_guess_owner_app "$d")"
 
     # Format: owner|mb|mtime|path
     printf "%s|%s|%s|%s\n" "$owner" "$mb" "$mod" "$d" >>"$report_file"
-  done
+  done <"$candidates_kb_path"
 
   # Sort by owner, then by size desc
   sort -t'|' -k1,1 -k2,2nr "$report_file" >"${report_file}.sorted"
@@ -205,7 +350,7 @@ run_caches_module() {
     # Explain-only: show top subfolders by size (up to 3)
     if [[ "${EXPLAIN:-false}" == "true" ]]; then
       explain_log "  Subfolders (top 3 by size):"
-      du -sk "${path}"/* 2>/dev/null \
+      find "${path}" -mindepth 1 -maxdepth 1 -exec du -sk {} + 2>/dev/null \
         | sort -nr \
         | head -n 3 \
         | while read -r skb sub; do

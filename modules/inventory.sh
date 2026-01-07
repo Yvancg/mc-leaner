@@ -152,10 +152,21 @@ _inventory_scan_apps_root() {
     base="$(basename "$app")"
     name="${base%.app}"
 
-    # If the .app is a symlink, use its target to decide whether it is a system app.
-    # This matters on newer macOS builds where some Apple apps appear under /Applications
-    # but actually point into Cryptex or other system locations.
-    target="$(/usr/bin/stat -f%Y "$app" 2>/dev/null || true)"
+    # If the .app is a symlink, use its resolved target to decide whether it is a system app.
+    # On newer macOS builds, some Apple apps appear under /Applications but point into Cryptex.
+    target=""
+    if [[ -L "$app" ]]; then
+      target="$(readlink "$app" 2>/dev/null || true)"
+      # Resolve relative symlinks to an absolute path (best-effort).
+      if [[ -n "$target" && "$target" != /* ]]; then
+        # Build an absolute path by resolving the directory part via `cd`.
+        local link_dir tgt_dir tgt_base
+        link_dir="$(dirname "$app")"
+        tgt_dir="$(dirname "$target")"
+        tgt_base="$(basename "$target")"
+        target="$(cd "$link_dir" 2>/dev/null && cd "$tgt_dir" 2>/dev/null && pwd)/$tgt_base"
+      fi
+    fi
     if [[ -z "$target" ]]; then
       target="$app"
     fi

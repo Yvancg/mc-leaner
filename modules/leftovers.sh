@@ -467,7 +467,7 @@ _leftovers_scan_target() {
       continue
     fi
 
-    # Heuristic: only consider bundle-id looking names in v1.4.0 unless allowlisted.
+    # Heuristic: only consider bundle-id looking names (or TeamID-prefixed container ids) unless allowlisted.
     # (com.vendor.App, net.vendor.App, org.vendor.App, etc)
     if [[ "$is_allowlisted" != "true" ]] && ! _leftovers_looks_like_bundle_id "$base"; then
       if [[ "$explain" == "true" && "$explain_skips" == "true" ]]; then
@@ -623,10 +623,28 @@ _leftovers_matches_installed() {
 }
 
 _leftovers_looks_like_bundle_id() {
-  # Conservative pattern: at least 2 dots, only [A-Za-z0-9._-]
-  # Examples: com.google.Chrome, net.whatsapp.WhatsApp, org.mozilla.firefox
+  # Conservative patterns.
+  # 1) Standard bundle id: at least 2 dots, only [A-Za-z0-9._-]
+  #    Examples: com.google.Chrome, net.whatsapp.WhatsApp, org.mozilla.firefox
+  # 2) TeamID-prefixed container id: <TEAMID>.<token> (common in Group Containers)
+  #    Examples: BQR82RBBHL.slack, UBF8T346G9.com.microsoft.teams
+  #
+  # Safety note: this only makes an entry *eligible* for leftover consideration.
+  # We still run installed-match checks and size thresholds before flagging.
   local s="$1"
-  echo "$s" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]*\.[A-Za-z0-9._-]*\.[A-Za-z0-9._-]+$'
+
+  # Standard bundle id (>= 2 dots)
+  if echo "$s" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]*\.[A-Za-z0-9._-]*\.[A-Za-z0-9._-]+$'; then
+    return 0
+  fi
+
+  # TeamID-prefixed (exactly one TeamID prefix; remainder must be non-empty token)
+  # Allow one or more dots in the remainder.
+  if echo "$s" | grep -Eq '^[A-Z0-9]{10}\.[A-Za-z0-9][A-Za-z0-9._-]*$'; then
+    return 0
+  fi
+
+  return 1
 }
 
 _dir_mb() {

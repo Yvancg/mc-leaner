@@ -445,6 +445,28 @@ resolve_owner_from_path() {
     return 0
   fi
 
+  # 0) If the path is inside an app bundle, try a direct path-based lookup first.
+  # This helps when we are given deep paths like:
+  #   /Applications/Foo.app/Contents/...
+  # Inventory indexes both the visible app path and the resolved target for symlinked apps.
+  if [[ "$p" == *".app/"* ]]; then
+    local app_dir
+    app_dir="${p%%.app/*}.app"
+    if [[ -n "$app_dir" ]]; then
+      local hit
+      if hit="$(inventory_lookup "path:$app_dir" 2>/dev/null)"; then
+        local hit_name hit_source hit_path
+        IFS=$'\t' read -r hit_name hit_source hit_path <<< "$hit"
+        owner_name="$hit_name"
+        owner_key="path:$app_dir"
+        owner_source="$hit_source"
+        installed="true"
+        echo "${owner_name}|${owner_key}|${owner_source}|${installed}"
+        return 0
+      fi
+    fi
+  fi
+
   # 1) Bundle-id like paths (Containers, Group Containers, bundle-id cache folders)
   # Containers: ~/Library/Containers/<bundle-id>/...
   if [[ "$p" == *"/Library/Containers/"* ]]; then
@@ -471,6 +493,26 @@ resolve_owner_from_path() {
     fi
   fi
 
+  # Normalize common bundle-id variants so we can match inventory keys.
+  # Examples:
+  #   EQHXZ8M8AV.group.com.google.drivefs -> com.google.drivefs
+  #   group.net.whatsapp.WhatsApp.shared -> net.whatsapp.WhatsApp.shared
+  #   6N38VWS5BX.ru.keepcoder.Telegram -> ru.keepcoder.Telegram
+  local owner_key_norm1=""
+  local owner_key_norm2=""
+  if [[ -n "$owner_key" ]]; then
+    # Strip Team ID prefix if present (10 chars + dot)
+    if [[ "$owner_key" =~ ^[A-Z0-9]{10}\.(.+)$ ]]; then
+      owner_key_norm1="${BASH_REMATCH[1]}"
+    fi
+    # Strip leading group.
+    if [[ "$owner_key" == group.* ]]; then
+      owner_key_norm2="${owner_key#group.}"
+    elif [[ -n "$owner_key_norm1" && "$owner_key_norm1" == group.* ]]; then
+      owner_key_norm2="${owner_key_norm1#group.}"
+    fi
+  fi
+
   # 2) If not found, infer app from /Applications/<Name>.app
   if [[ -z "$owner_key" && "$p" == /Applications/*".app"* ]]; then
     local app_base after
@@ -481,10 +523,27 @@ resolve_owner_from_path() {
 
   if [[ -n "$owner_key" ]]; then
     local hit
+
+    # Try exact key first.
     if hit="$(inventory_lookup "$owner_key" 2>/dev/null)"; then
       local hit_name hit_source hit_path
       IFS=$'\t' read -r hit_name hit_source hit_path <<< "$hit"
       owner_name="$hit_name"
+      owner_source="$hit_source"
+      installed="true"
+    # Then try normalized variants.
+    elif [[ -n "$owner_key_norm1" ]] && hit="$(inventory_lookup "$owner_key_norm1" 2>/dev/null)"; then
+      local hit_name hit_source hit_path
+      IFS=$'\t' read -r hit_name hit_source hit_path <<< "$hit"
+      owner_name="$hit_name"
+      owner_key="$owner_key_norm1"
+      owner_source="$hit_source"
+      installed="true"
+    elif [[ -n "$owner_key_norm2" ]] && hit="$(inventory_lookup "$owner_key_norm2" 2>/dev/null)"; then
+      local hit_name hit_source hit_path
+      IFS=$'\t' read -r hit_name hit_source hit_path <<< "$hit"
+      owner_name="$hit_name"
+      owner_key="$owner_key_norm2"
       owner_source="$hit_source"
       installed="true"
     else

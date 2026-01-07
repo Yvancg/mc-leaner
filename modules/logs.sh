@@ -36,11 +36,15 @@ _logs_owner_label() {
   case "$p" in
     "$HOME/Library/Logs"/*)
       # ~/Library/Logs/<owner>/...
-      echo "$(echo "$p" | sed -E "s|^$HOME/Library/Logs/([^/]+).*|\\1|")"
+      local rest
+      rest="${p#"$HOME/Library/Logs/"}"
+      echo "${rest%%/*}"
       ;;
     "/Library/Logs"/*)
       # /Library/Logs/<owner>/...
-      echo "$(echo "$p" | sed -E "s|^/Library/Logs/([^/]+).*|\\1|")"
+      local rest
+      rest="${p#"/Library/Logs/"}"
+      echo "${rest%%/*}"
       ;;
     "/var/log"/*)
       echo "system"
@@ -74,6 +78,10 @@ _logs_rotations_summary() {
   dir="$(dirname "$p")"
   base="$(basename "$p")"
 
+  # Escape regex metacharacters in base to avoid unintended regex behavior
+  local base_re
+  base_re="$(printf '%s' "$base" | sed -E 's/[][(){}.^$*+?|\\]/\\\\&/g')"
+
   # Skip if directory is unreadable
   [[ -d "$dir" ]] || return 0
 
@@ -85,7 +93,7 @@ _logs_rotations_summary() {
   #   file.log.gz
   # Also include *.old
   local matches
-  matches=$(ls -1 "$dir" 2>/dev/null | grep -E "^${base}(\\.[0-9]+)?(\\.gz)?$|^${base}\\.old$" || true)
+  matches=$(ls -1 "$dir" 2>/dev/null | grep -E "^${base_re}(\\.[0-9]+)?(\\.gz)?$|^${base_re}\\.old$" || true)
   [[ -n "$matches" ]] || return 0
 
   explain_log "  Rotated (same dir):"
@@ -202,6 +210,7 @@ run_logs_module() {
   # End-of-run contract arrays
   local -a flagged_items=()
   local -a move_failures=()
+  local moved_count=0
 
   # Validate threshold
   if [[ -z "$threshold_mb" ]]; then
@@ -342,7 +351,9 @@ run_logs_module() {
         if _logs_confirm_move "$path"; then
           # Use move contract: capture output and status
           local move_out=""
-          if ! move_out="$(_logs_move_to_backup "$path" "$backup_dir")"; then
+          if move_out="$(_logs_move_to_backup "$path" "$backup_dir")"; then
+            moved_count=$((moved_count + 1))
+          else
             move_failures+=("${path} | ${move_out}")
             log "Logs: move failed: ${path} | ${move_out}"
           fi
@@ -359,7 +370,9 @@ run_logs_module() {
         log "Logs: system path detected (confirm carefully): $path"
         if _logs_confirm_move "$path"; then
           local move_out=""
-          if ! move_out="$(_logs_move_to_backup "$path" "$backup_dir")"; then
+          if move_out="$(_logs_move_to_backup "$path" "$backup_dir")"; then
+            moved_count=$((moved_count + 1))
+          else
             move_failures+=("${path} | ${move_out}")
             log "Logs: move failed: ${path} | ${move_out}"
           fi
@@ -401,7 +414,7 @@ run_logs_module() {
     # Format: <Module> flagged=<n> total_mb=<n> moved=<n> failures=<n>
     # Notes:
     # - This module does not currently track successful moves (only failures). We report moved=0 for now.
-    summary_add "Logs flagged=${#flagged_items[@]} total_mb=${total_mb} moved=0 failures=${#move_failures[@]}"
+    summary_add "Logs flagged=${#flagged_items[@]} total_mb=${total_mb} moved=${moved_count} failures=${#move_failures[@]}"
   fi
 
   if [[ "$apply" != "true" ]]; then

@@ -34,6 +34,15 @@ fi
 # Helpers
 # ----------------------------
 
+# Defensive: ensure tmpfile exists (mktemp wrapper)
+if ! type tmpfile >/dev/null 2>&1; then
+  tmpfile() {
+    # Purpose: create a temp file path
+    # Safety: creates an empty temp file
+    mktemp -t mc-leaner.XXXXXX
+  }
+fi
+
 _brew_array_len() {
   # Purpose: safe array length under `set -u` (returns 0 if unset)
   # Inputs: variable name
@@ -183,15 +192,17 @@ _brew_top_n_largest_formulae() {
 
   # `du -sk Cellar/*` yields: <kb> <path>
   # Convert to MB and capture the formula name from the directory basename.
-  du -sk "$cellar"/* 2>/dev/null | while IFS=$'\t' read -r kb p; do
-    [[ -n "${kb:-}" && -n "${p:-}" ]] || continue
-    local f
-    f="$(basename "$p" 2>/dev/null || echo "")"
-    [[ -n "$f" ]] || continue
-    local mb
-    mb="$(_brew_kb_to_mb "$kb")"
-    printf "%s|%s\n" "$mb" "$f" >> "$tmp"
-  done
+  du -sk "$cellar"/* 2>/dev/null \
+    | awk '{kb=$1; $1=""; sub(/^\s+/,"",$0); if(kb ~ /^[0-9]+$/ && length($0)>0) print kb"\t"$0; }' \
+    | while IFS=$'\t' read -r kb p; do
+        [[ -n "${kb:-}" && -n "${p:-}" ]] || continue
+        local f
+        f="$(basename "$p" 2>/dev/null || echo "")"
+        [[ -n "$f" ]] || continue
+        local mb
+        mb="$(_brew_kb_to_mb "$kb")"
+        printf "%s|%s\n" "$mb" "$f" >> "$tmp"
+      done
 
   # Sort by size desc and print top N.
   sort -t '|' -k1,1nr "$tmp" 2>/dev/null | head -n "$n" | while IFS='|' read -r mb f; do
@@ -369,7 +380,7 @@ run_brew_module() {
       # First token is the formula name (brew outdated prints just the name)
       local name
       name="$(echo "$line" | awk '{print $1}')"
-      if echo "$pinned_lookup" | grep -q $'\n'"$name"$'\n'; then
+      if echo "$pinned_lookup" | grep -Fq $'\n'"$name"$'\n'; then
         outdated_pinned="${outdated_pinned}${line}"$'\n'
         BREW_OUTDATED_PINNED+=("$name")
       else

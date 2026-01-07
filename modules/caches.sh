@@ -197,7 +197,6 @@ run_caches_module() {
   # Scan targets (user-level only)
   # ----------------------------
   local home="$HOME"
-  local candidates=()
 
   local scanned_dirs=0
   local over_threshold=0
@@ -211,6 +210,7 @@ run_caches_module() {
   # Best-effort cleanup of temp files created by this module.
   _caches_cleanup_tmp() {
     rm -f "$below_report_file" "$candidate_list_file" \
+      "${candidates_kb_path:-}" \
       "${report_file:-}" "${report_file:-}.sorted" 2>/dev/null || true
   }
   trap _caches_cleanup_tmp EXIT
@@ -261,7 +261,7 @@ run_caches_module() {
         printf "%s|%s\n" "$mb" "$d" >>"$below_report_file"
       fi
     done < <(
-      find "$home/Library/Containers" -maxdepth 3 -type d -path "*/Data/Library/Caches" -exec du -sk {} + 2>/dev/null || true
+      find "$home/Library/Containers" -mindepth 4 -maxdepth 4 -type d -path "*/Data/Library/Caches" -exec du -sk {} + 2>/dev/null || true
     )
   fi
 

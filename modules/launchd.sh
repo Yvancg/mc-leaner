@@ -19,6 +19,24 @@ if ! type explain_log >/dev/null 2>&1; then
 fi
 
 # ----------------------------
+# Defensive: ensure tmpfile exists (modules should not assume it)
+# ----------------------------
+if ! type tmpfile >/dev/null 2>&1; then
+  tmpfile() {
+    # Purpose: create a temporary file path
+    # Safety: returns path only; caller owns content
+    if is_cmd mktemp; then
+      mktemp 2>/dev/null || mktemp -t mc-leaner 2>/dev/null
+    else
+      # Very defensive fallback
+      local p="${TMPDIR:-/tmp}/mc-leaner.$$.${RANDOM}.tmp"
+      : >"$p"
+      echo "$p"
+    fi
+  }
+fi
+
+# ----------------------------
 # Module entry point
 # ----------------------------
 run_launchd_module() {
@@ -29,10 +47,23 @@ run_launchd_module() {
   local move_fail_count=0
   local move_failures=()
 
-  # Precompute inventory keys for fast membership checks (performance)
+  # Temp files created by this module (cleaned up on return)
   local inventory_keys_file=""
+  local active_jobs_file=""
+  local _launchd_tmpfiles=()
+
+  _launchd_tmp_cleanup() {
+    local f
+    for f in "${_launchd_tmpfiles[@]:-}"; do
+      [[ -n "$f" && -e "$f" ]] && rm -f "$f" 2>/dev/null || true
+    done
+  }
+  trap _launchd_tmp_cleanup RETURN
+
+  # Precompute inventory keys for fast membership checks (performance)
   if [[ -n "${inventory_index_file}" && -f "${inventory_index_file}" ]]; then
     inventory_keys_file="$(tmpfile)"
+    _launchd_tmpfiles+=("$inventory_keys_file")
     # Column 1 contains keys; de-duplicate once
     cut -f1 "${inventory_index_file}" | LC_ALL=C sort -u >"${inventory_keys_file}" 2>/dev/null || true
   fi
@@ -121,7 +152,8 @@ run_launchd_module() {
     local label="$1"
 
     # If inventory is not available, do not claim a match.
-    [[ -n "$label" && -f "$inventory_index_file" ]] || return 1
+    [[ -n "$label" ]] || return 1
+    [[ -n "${inventory_keys_file}" && -f "${inventory_keys_file}" ]] || return 1
 
     # Exact match (bundle id or normalized key already present)
     if _inventory_index_has_key "$label"; then
@@ -150,8 +182,8 @@ run_launchd_module() {
   # Snapshot active launchctl jobs
   # ----------------------------
   log "Scanning active launchctl jobs..."
-  local active_jobs_file
   active_jobs_file="$(tmpfile)"
+  _launchd_tmpfiles+=("$active_jobs_file")
 
   # Helper: determine whether a label is currently loaded (reduces false positives)
   launchctl list | awk 'NR>1 {print $3}' | grep -v '^-$' >"$active_jobs_file" 2>/dev/null || true
@@ -226,7 +258,7 @@ run_launchd_module() {
       # If we cannot resolve a program path, skip instead of guessing.
       # This prevents false positives for plists that only define other keys.
       if [[ -z "$prog" ]]; then
-        log "SKIP (unknown program): $plist_path (label: $label, program: <none>)"
+        explain_log "SKIP (unknown program): $plist_path (label: $label, program: <none>)"
         continue
       fi
 

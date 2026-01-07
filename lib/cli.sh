@@ -24,7 +24,7 @@ usage() {
 mc-leaner
 
 Usage:
-  bash mc-leaner.sh [--mode <scan|clean|report|launchd-only|bins-only|caches-only|logs-only|brew-only|leftovers-only|permissions-only>] [--apply] [--backup-dir <path>] [--explain]
+  bash mc-leaner.sh [--mode <scan|clean|report|inventory-only|launchd-only|bins-only|caches-only|logs-only|brew-only|leftovers-only|permissions-only>] [--apply] [--backup-dir <path>] [--explain]
 
 Defaults:
   --mode scan     (dry-run, no moves)
@@ -37,6 +37,7 @@ Examples:
   bash mc-leaner.sh
   bash mc-leaner.sh --mode clean --apply
   bash mc-leaner.sh --mode report
+  bash mc-leaner.sh --mode inventory-only
   bash mc-leaner.sh --mode caches-only
   bash mc-leaner.sh --mode logs-only
   bash mc-leaner.sh --mode brew-only
@@ -62,6 +63,21 @@ parse_args() {
       *) echo "Unknown arg: $1"; usage; exit 1 ;;
     esac
   done
+
+  validate_mode
+}
+
+validate_mode() {
+  case "$MODE" in
+    scan|clean|report|inventory-only|launchd-only|bins-only|caches-only|logs-only|brew-only|leftovers-only|permissions-only)
+      return 0
+      ;;
+    *)
+      echo "Invalid --mode: $MODE"
+      usage
+      exit 1
+      ;;
+  esac
 }
 
 # End of library

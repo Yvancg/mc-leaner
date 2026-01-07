@@ -48,6 +48,11 @@ LEFTOVERS_FLAGGED_ITEMS=()
 # Format: one string per item (pre-formatted for display).
 LEFTOVERS_MOVE_FAILURES=()
 
+# Explain-mode tracing for installed-match decisions.
+# When _leftovers_matches_installed returns true, it will set these for optional logging.
+LEFTOVERS_INSTALLED_MATCH_KEY=""
+LEFTOVERS_INSTALLED_MATCH_METHOD=""
+
 # Contribute to the global end-of-run summary (if available).
 # Contract: modules should add a short, actionable summary of what was flagged and what failed.
 _leftovers_summary_emit() {
@@ -460,7 +465,11 @@ _leftovers_scan_target() {
     # This handles Team ID prefixes and group container sub-identifiers.
     if [[ "$is_allowlisted" != "true" ]] && _leftovers_matches_installed "$base" "$installed_index_keys_file"; then
       if [[ "$explain" == "true" && "$explain_skips" == "true" ]]; then
-        explain_log "Leftovers: skip (installed-match): ${base}"
+        if [[ -n "${LEFTOVERS_INSTALLED_MATCH_KEY:-}" ]]; then
+          explain_log "Leftovers: skip (installed-match): ${base} (matched: ${LEFTOVERS_INSTALLED_MATCH_KEY} via ${LEFTOVERS_INSTALLED_MATCH_METHOD})"
+        else
+          explain_log "Leftovers: skip (installed-match): ${base}"
+        fi
       fi
       continue
     fi
@@ -542,6 +551,10 @@ _leftovers_matches_installed() {
 
   [[ -f "$installed_index_keys_file" ]] || return 1
 
+  # Reset explain-mode tracing vars at start.
+  LEFTOVERS_INSTALLED_MATCH_KEY=""
+  LEFTOVERS_INSTALLED_MATCH_METHOD=""
+
   local s
   s="$(_leftovers_strip_team_prefix "$raw")"
 
@@ -555,6 +568,8 @@ _leftovers_matches_installed() {
 
   # 1) Direct id match
   if [[ -n "$s" ]] && grep -qFx -- "$s" "$installed_index_keys_file" 2>/dev/null; then
+    LEFTOVERS_INSTALLED_MATCH_KEY="$s"
+    LEFTOVERS_INSTALLED_MATCH_METHOD="bundle-id"
     return 0
   fi
 
@@ -563,6 +578,8 @@ _leftovers_matches_installed() {
     local remainder
     remainder="${s#group.}"
     if [[ -n "$remainder" ]] && grep -qFx -- "$remainder" "$installed_index_keys_file" 2>/dev/null; then
+      LEFTOVERS_INSTALLED_MATCH_KEY="$remainder"
+      LEFTOVERS_INSTALLED_MATCH_METHOD="bundle-id (group.)"
       return 0
     fi
     s="$remainder"
@@ -571,6 +588,8 @@ _leftovers_matches_installed() {
   # 3) Normalized full key
   cand="$(echo "$s" | tr -cd '[:alnum:]' | tr '[:upper:]' '[:lower:]' 2>/dev/null || echo "$s")"
   if [[ -n "$cand" ]] && grep -qFx -- "$cand" "$installed_index_keys_file" 2>/dev/null; then
+    LEFTOVERS_INSTALLED_MATCH_KEY="$cand"
+    LEFTOVERS_INSTALLED_MATCH_METHOD="normalized(full)"
     return 0
   fi
 
@@ -579,6 +598,8 @@ _leftovers_matches_installed() {
   last_seg="${s##*.}"
   last_seg="$(echo "$last_seg" | tr -cd '[:alnum:]' | tr '[:upper:]' '[:lower:]' 2>/dev/null || echo "$last_seg")"
   if [[ -n "$last_seg" ]] && grep -qFx -- "$last_seg" "$installed_index_keys_file" 2>/dev/null; then
+    LEFTOVERS_INSTALLED_MATCH_KEY="$last_seg"
+    LEFTOVERS_INSTALLED_MATCH_METHOD="normalized(last)"
     return 0
   fi
 
@@ -590,6 +611,8 @@ _leftovers_matches_installed() {
     prev_seg="${prev_seg##*.}"
     prev_seg="$(echo "$prev_seg" | tr -cd '[:alnum:]' | tr '[:upper:]' '[:lower:]' 2>/dev/null || echo "$prev_seg")"
     if [[ -n "$prev_seg" ]] && grep -qFx -- "$prev_seg" "$installed_index_keys_file" 2>/dev/null; then
+      LEFTOVERS_INSTALLED_MATCH_KEY="$prev_seg"
+      LEFTOVERS_INSTALLED_MATCH_METHOD="normalized(prev)"
       return 0
     fi
   fi

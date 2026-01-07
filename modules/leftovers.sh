@@ -21,7 +21,7 @@
 # - apply: "true" or "false"
 # - backup_dir: destination for relocation when apply=true (reversible)
 # - explain: "true" or "false" (verbose reasoning)
-# - known_bundle_ids_file: newline list of known installed app bundle identifiers
+# - inventory_file: inventory.tsv produced by modules/inventory.sh (contains installed apps + brew)
 #
 # Output
 # - Groups by inferred owner (bundle id or app name)
@@ -221,19 +221,22 @@ run_leftovers_module() {
   local apply="$1"
   local backup_dir="$2"
   local explain="${3:-false}"
-  local known_bundle_ids_file="${4:-}"
+  local inventory_file="${4:-}"
 
   log "Leftovers: scanning user-level support locations (inspection-first)..."
+  if [[ "$explain" == "true" ]]; then
+    explain_log "Leftovers (explain): using inventory file: ${inventory_file}"
+  fi
 
   LEFTOVERS_FLAGGED_COUNT=0
   LEFTOVERS_FLAGGED_ITEMS=()
   LEFTOVERS_MOVE_FAILURES=()
 
-  if [[ -z "$known_bundle_ids_file" || ! -f "$known_bundle_ids_file" ]]; then
+  if [[ -z "$inventory_file" || ! -f "$inventory_file" ]]; then
     if [[ "$explain" == "true" ]]; then
-      explain_log "Leftovers: missing known bundle IDs list; skipping leftovers module."
+      explain_log "Leftovers: missing inventory file; skipping leftovers module."
     else
-      log "Leftovers: missing known bundle IDs list; skipping."
+      log "Leftovers: missing inventory file; skipping."
     fi
     _leftovers_summary_emit
     return 0
@@ -249,6 +252,20 @@ run_leftovers_module() {
     else
       explain_log "Leftovers: allowlist not found (optional): ${allowlist_file}"
     fi
+  fi
+
+  # Build a newline list of installed app bundle IDs from inventory (used to avoid false positives).
+  # Inventory format (tab-separated): kind  source  name  bundle_id  path
+  local installed_bundle_ids_file
+  installed_bundle_ids_file="$(mktemp -t mcleaner_installed_bundle_ids.XXXXXX)"
+
+  awk -F'\t' '($1=="app" && $4!="" ){print $4}' "$inventory_file" \
+    | sort -u > "$installed_bundle_ids_file"
+
+  if [[ "$explain" == "true" ]]; then
+    local _n
+    _n=$(wc -l < "$installed_bundle_ids_file" 2>/dev/null || echo "0")
+    explain_log "Leftovers (explain): installed app bundle IDs loaded: ${_n}"
   fi
 
   local targets=()
@@ -272,13 +289,14 @@ run_leftovers_module() {
       prefs_report_only="true"
     fi
 
-    if _leftovers_scan_target "$t" "$prefs_report_only" "$min_mb" "$apply" "$backup_dir" "$explain" "$known_bundle_ids_file" "$allowlist_file"; then
+    if _leftovers_scan_target "$t" "$prefs_report_only" "$min_mb" "$apply" "$backup_dir" "$explain" "$installed_bundle_ids_file" "$allowlist_file"; then
       found_any="true"
     fi
   done
 
   if [[ "$found_any" != "true" || "${LEFTOVERS_FLAGGED_COUNT}" -eq 0 ]]; then
     log "Leftovers: no large leftovers found (by heuristics)."
+    rm -f "$installed_bundle_ids_file" 2>/dev/null || true
     _leftovers_summary_emit
     return 0
   fi
@@ -300,6 +318,7 @@ run_leftovers_module() {
   fi
 
   log "Leftovers: run with --apply to relocate selected leftovers (user-confirmed, reversible)."
+  rm -f "$installed_bundle_ids_file" 2>/dev/null || true
   _leftovers_summary_emit
 }
 
@@ -314,7 +333,7 @@ _leftovers_scan_target() {
   local apply="$4"
   local backup_dir="$5"
   local explain="$6"
-  local known_bundle_ids_file="$7"
+  local installed_bundle_ids_file="$7"
   local allowlist_file="${8:-}"
 
   if [[ "$explain" == "true" ]]; then
@@ -406,7 +425,7 @@ _leftovers_scan_target() {
 
     # Installed-match rule: if the folder name can be linked to an installed app, skip.
     # This handles Team ID prefixes and group container sub-identifiers.
-    if [[ "$is_allowlisted" != "true" ]] && _leftovers_matches_installed "$base" "$known_bundle_ids_file"; then
+    if [[ "$is_allowlisted" != "true" ]] && _leftovers_matches_installed "$base" "$installed_bundle_ids_file"; then
       if [[ "$explain" == "true" && "$explain_skips" == "true" ]]; then
         explain_log "Leftovers: skip (installed-match): ${base}"
       fi

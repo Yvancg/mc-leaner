@@ -23,11 +23,19 @@ fi
 # ----------------------------
 run_launchd_module() {
   local mode="$1" apply="$2" backup_dir="$3"
-  local inventory_index_file="$4"
+  local inventory_index_file="${4:-}"
   local flagged_count=0
   local flagged_items=()
   local move_fail_count=0
   local move_failures=()
+
+  # Precompute inventory keys for fast membership checks (performance)
+  local inventory_keys_file=""
+  if [[ -n "${inventory_index_file}" && -f "${inventory_index_file}" ]]; then
+    inventory_keys_file="$(tmpfile)"
+    # Column 1 contains keys; de-duplicate once
+    cut -f1 "${inventory_index_file}" | LC_ALL=C sort -u >"${inventory_keys_file}" 2>/dev/null || true
+  fi
 
   # ----------------------------
   # Summary: module end-of-run contract
@@ -101,15 +109,8 @@ run_launchd_module() {
     # Purpose: check if inventory index contains key in column 1
     # Expected format: key<TAB>name<TAB>source<TAB>path
     local k="$1"
-    [[ -n "$k" && -f "$inventory_index_file" ]] || return 1
-    awk -F$'\t' -v k="$k" '$1==k {found=1; exit} END{exit (found?0:1)}' "$inventory_index_file" 2>/dev/null
-  }
-
-  _inventory_index_has_path() {
-    # Purpose: check if inventory index contains an exact path in column 4
-    local p="$1"
-    [[ -n "$p" && -f "$inventory_index_file" ]] || return 1
-    awk -F$'\t' -v p="$p" '$4==p {found=1; exit} END{exit (found?0:1)}' "$inventory_index_file" 2>/dev/null
+    [[ -n "$k" && -n "${inventory_keys_file}" && -f "${inventory_keys_file}" ]] || return 1
+    grep -qxF "$k" "${inventory_keys_file}" 2>/dev/null
   }
 
   _launchd_label_matches_inventory() {
@@ -182,7 +183,13 @@ run_launchd_module() {
       [[ -f "$plist_path" ]] || continue
 
       local label
-      label="$(defaults read "$plist_path" Label 2>/dev/null || true)"
+      label=""
+      if is_cmd plutil; then
+        label="$(plutil -extract Label raw -o - "$plist_path" 2>/dev/null || true)"
+      fi
+      if [[ -z "${label}" ]]; then
+        label="$(defaults read "$plist_path" Label 2>/dev/null || true)"
+      fi
       [[ -n "${label:-}" ]] || continue
 
       checked=$((checked + 1))
@@ -211,12 +218,6 @@ run_launchd_module() {
       if _launchd_label_matches_inventory "$label"; then
         explain_log "SKIP (installed-match via inventory): $plist_path (label: $label)"
         continue
-      fi
-
-      # Back-compat: if a legacy known-apps file is provided and readable, use it as an additional skip-list.
-      # (Do not require it; inventory should be the primary source of truth.)
-      if [[ -n "${inventory_index_file:-}" && -f "${inventory_index_file}" ]]; then
-        : # inventory present; nothing else to do here
       fi
 
       local prog

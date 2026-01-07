@@ -44,6 +44,7 @@ inventory_index_file=""
 
 known_apps_file=""            # legacy: mixed list used by launchd heuristics
 brew_formulae_file=""         # legacy: list of brew formulae/casks used by /usr/local/bin heuristics
+brew_bins_file=""             # preferred: brew executable basenames list (from inventory when available)
 installed_bundle_ids_file=""  # legacy: bundle id list used by leftovers module
 
 ensure_inventory() {
@@ -81,6 +82,36 @@ ensure_brew_formulae() {
     brew list --cask    >> "$brew_formulae_file" 2>/dev/null || true
   else
     log "Homebrew not found, skipping brew-based checks."
+  fi
+}
+
+ensure_brew_bins() {
+  # Purpose: Build a newline list of Homebrew executable basenames.
+  # Preferred source: inventory exports INVENTORY_BREW_BINS_FILE (fast, already computed).
+  # Fallback: list brew prefix bin/sbin.
+  if [[ -n "$brew_bins_file" ]]; then
+    return 0
+  fi
+
+  ensure_inventory
+
+  if [[ "${INVENTORY_BREW_BINS_READY:-false}" == "true" && -n "${INVENTORY_BREW_BINS_FILE:-}" && -r "${INVENTORY_BREW_BINS_FILE:-}" ]]; then
+    brew_bins_file="$INVENTORY_BREW_BINS_FILE"
+    return 0
+  fi
+
+  brew_bins_file="$(tmpfile)"
+  : > "$brew_bins_file"
+
+  if is_cmd brew; then
+    local bp
+    bp="$(brew --prefix 2>/dev/null || true)"
+    if [[ -n "$bp" ]]; then
+      {
+        find "$bp/bin"  -maxdepth 1 -type f -perm -111 -print 2>/dev/null || true
+        find "$bp/sbin" -maxdepth 1 -type f -perm -111 -print 2>/dev/null || true
+      } | awk -F'/' 'NF{print $NF}' | sort -u >> "$brew_bins_file" 2>/dev/null || true
+    fi
   fi
 }
 
@@ -186,13 +217,14 @@ fi
 case "$MODE" in
   scan)
     ensure_inventory
-    ensure_known_apps
     ensure_brew_formulae
+    ensure_known_apps
+    ensure_brew_bins
     run_brew_module "false" "$BACKUP_DIR" "$EXPLAIN"
     summary_add "brew: inspected"
     run_launchd_module "scan" "false" "$BACKUP_DIR" "$known_apps_file"
     summary_add "launchd: inspected"
-    run_bins_module "scan" "false" "$BACKUP_DIR" "$brew_formulae_file"
+    run_bins_module "scan" "false" "$BACKUP_DIR" "$brew_bins_file"
     summary_add "bins: inspected"
     run_caches_module "scan" "false" "$BACKUP_DIR"
     summary_add "caches: inspected"
@@ -212,11 +244,12 @@ case "$MODE" in
       exit 1
     fi
     ensure_inventory
-    ensure_known_apps
     ensure_brew_formulae
+    ensure_known_apps
+    ensure_brew_bins
     run_launchd_module "clean" "true" "$BACKUP_DIR" "$known_apps_file"
     summary_add "launchd: cleaned"
-    run_bins_module "clean" "true" "$BACKUP_DIR" "$brew_formulae_file"
+    run_bins_module "clean" "true" "$BACKUP_DIR" "$brew_bins_file"
     summary_add "bins: cleaned"
     run_caches_module "clean" "true" "$BACKUP_DIR"
     summary_add "caches: cleaned"
@@ -257,12 +290,12 @@ case "$MODE" in
     ;;
   bins-only)
     ensure_inventory
-    ensure_brew_formulae
+    ensure_brew_bins
     if [[ "$APPLY" != "true" ]]; then
-      run_bins_module "scan" "false" "$BACKUP_DIR" "$brew_formulae_file"
+      run_bins_module "scan" "false" "$BACKUP_DIR" "$brew_bins_file"
       summary_add "bins: inspected"
     else
-      run_bins_module "clean" "true" "$BACKUP_DIR" "$brew_formulae_file"
+      run_bins_module "clean" "true" "$BACKUP_DIR" "$brew_bins_file"
       summary_add "bins: cleaned"
     fi
     ;;

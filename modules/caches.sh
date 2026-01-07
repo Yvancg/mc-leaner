@@ -27,6 +27,13 @@ run_caches_module() {
   local backup_dir="$3"
 
   # ----------------------------
+  # Helper: _inventory_ready (moved before first use)
+  # ----------------------------
+  _inventory_ready() {
+    [[ "${INVENTORY_READY:-false}" == "true" ]] && [[ -n "${INVENTORY_INDEX_FILE:-}" ]] && [[ -f "${INVENTORY_INDEX_FILE:-}" ]]
+  }
+
+  # ----------------------------
   # Scan configuration
   # ----------------------------
   local min_mb=200  # TODO: make configurable via CLI when the interface stabilizes
@@ -54,10 +61,6 @@ run_caches_module() {
     local epoch
     epoch="$(stat -f "%m" "$1" 2>/dev/null || echo "")"
     [[ -n "$epoch" ]] && date -r "$epoch" +"%Y-%m-%d %H:%M:%S" || echo "unknown"
-  }
-
-  _inventory_ready() {
-    [[ "${INVENTORY_READY:-false}" == "true" ]] && [[ -n "${INVENTORY_INDEX_FILE:-}" ]] && [[ -f "${INVENTORY_INDEX_FILE:-}" ]]
   }
 
   _norm_key() {

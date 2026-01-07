@@ -452,17 +452,10 @@ _leftovers_scan_target() {
       continue
     fi
 
-    # Heuristic: only consider bundle-id looking names in v1.4.0 unless allowlisted.
-    # (com.vendor.App, net.vendor.App, org.vendor.App, etc)
-    if [[ "$is_allowlisted" != "true" ]] && ! _leftovers_looks_like_bundle_id "$base"; then
-      if [[ "$explain" == "true" && "$explain_skips" == "true" ]]; then
-        explain_log "Leftovers: skip (non bundle-id name): ${p}"
-      fi
-      continue
-    fi
-
     # Installed-match rule: if the folder name can be linked to an installed app, skip.
-    # This handles Team ID prefixes and group container sub-identifiers.
+    # This must run BEFORE the bundle-id shape gate, because many Group Container folders
+    # use short tokens (e.g. "BQR82RBBHL.slack") that do not look like full bundle IDs.
+    # This is safe: it only reduces false positives (i.e., fewer leftovers flagged).
     if [[ "$is_allowlisted" != "true" ]] && _leftovers_matches_installed "$base" "$installed_index_keys_file"; then
       if [[ "$explain" == "true" && "$explain_skips" == "true" ]]; then
         if [[ -n "${LEFTOVERS_INSTALLED_MATCH_KEY:-}" ]]; then
@@ -470,6 +463,15 @@ _leftovers_scan_target() {
         else
           explain_log "Leftovers: skip (installed-match): ${base}"
         fi
+      fi
+      continue
+    fi
+
+    # Heuristic: only consider bundle-id looking names in v1.4.0 unless allowlisted.
+    # (com.vendor.App, net.vendor.App, org.vendor.App, etc)
+    if [[ "$is_allowlisted" != "true" ]] && ! _leftovers_looks_like_bundle_id "$base"; then
+      if [[ "$explain" == "true" && "$explain_skips" == "true" ]]; then
+        explain_log "Leftovers: skip (non bundle-id name): ${p}"
       fi
       continue
     fi

@@ -34,6 +34,7 @@ detect_host_app() {
   local pid="${PPID:-}"
   local depth=0
   local comm=""
+  local comm_base=""
   local ppid=""
 
   # Walk up a few levels to find the first recognizable GUI host.
@@ -42,7 +43,6 @@ detect_host_app() {
     # `ps -o comm=` can return a full path that may include spaces (e.g. "/Applications/Visual Studio Code.app/..."),
     # so we must NOT split on whitespace.
     local comm_raw=""
-    local comm_base=""
 
     comm_raw="$(ps -p "$pid" -o comm= 2>/dev/null || true)"
     comm="$(printf "%s" "$comm_raw" | sed 's/[[:space:]]*$//')"

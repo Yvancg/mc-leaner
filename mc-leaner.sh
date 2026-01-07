@@ -20,6 +20,7 @@ source "$ROOT_DIR/lib/ui.sh"
 source "$ROOT_DIR/lib/fs.sh"
 source "$ROOT_DIR/lib/safety.sh"
 
+source "$ROOT_DIR/modules/inventory.sh"
 source "$ROOT_DIR/modules/launchd.sh"
 source "$ROOT_DIR/modules/bins_usr_local.sh"
 source "$ROOT_DIR/modules/intel.sh"
@@ -32,64 +33,49 @@ source "$ROOT_DIR/modules/permissions.sh"
 
 
 # ----------------------------
-# Lazy context builders (avoid unnecessary work per mode)
+# Inventory-backed context builders
 # ----------------------------
-installed_apps_file=""
-brew_formulae_file=""
-known_apps_file=""
-installed_bundle_ids_file=""
-ensure_installed_bundle_ids() {
-  # Purpose: Build a newline list of CFBundleIdentifier values for installed .app bundles
-  # Notes: Used by leftovers module; best-effort; only runs once per invocation
-  if [[ -n "$installed_bundle_ids_file" ]]; then
+# The inventory module builds a unified list of installed software (apps + Homebrew)
+# and an index for fast lookups. Other modules can consume derived lists.
+
+inventory_ready="false"
+inventory_file=""
+inventory_index_file=""
+
+known_apps_file=""            # legacy: mixed list used by launchd heuristics
+brew_formulae_file=""         # legacy: list of brew formulae/casks used by /usr/local/bin heuristics
+installed_bundle_ids_file=""  # legacy: bundle id list used by leftovers module
+
+ensure_inventory() {
+  # Purpose: Build inventory once per invocation.
+  # Contract: inventory.sh should export INVENTORY_READY/INVENTORY_FILE/INVENTORY_INDEX_FILE.
+  if [[ "$inventory_ready" == "true" ]]; then
     return 0
   fi
 
-  ensure_installed_apps
+  # Best-effort; if inventory cannot be built, we keep going and let modules fall back.
+  run_inventory_module "scan" "false" "$BACKUP_DIR" "$EXPLAIN" || true
 
-  installed_bundle_ids_file="$(tmpfile)"
-  : > "$installed_bundle_ids_file"
-
-  # Extract bundle identifiers for each .app found. Best-effort and quiet.
-  while IFS= read -r app; do
-    [[ -d "$app" ]] || continue
-    local plist="$app/Contents/Info.plist"
-    [[ -f "$plist" ]] || continue
-
-    # Prefer defaults read for macOS compatibility; silence errors.
-    local bid
-    bid="$(/usr/bin/defaults read "$plist" CFBundleIdentifier 2>/dev/null || true)"
-    [[ -n "$bid" ]] && echo "$bid" >> "$installed_bundle_ids_file"
-  done < "$installed_apps_file"
-
-  # De-duplicate and normalize.
-  sort -u "$installed_bundle_ids_file" -o "$installed_bundle_ids_file" 2>/dev/null || true
-}
-
-ensure_installed_apps() {
-  # Purpose: Build a list of installed .app bundles for heuristic matching
-  # Notes: Only runs once per invocation
-  if [[ -n "$installed_apps_file" ]]; then
-    return 0
-  fi
-
-  installed_apps_file="$(tmpfile)"
-  log "Scanning installed .app bundles..."
-  find /Applications -maxdepth 2 -type d -name "*.app" > "$installed_apps_file" 2>/dev/null || true
-  find "$HOME/Applications" -maxdepth 2 -type d -name "*.app" >> "$installed_apps_file" 2>/dev/null || true
+  inventory_ready="${INVENTORY_READY:-false}"
+  inventory_file="${INVENTORY_FILE:-}"
+  inventory_index_file="${INVENTORY_INDEX_FILE:-}"
 }
 
 ensure_brew_formulae() {
-  # Purpose: Build a list of Homebrew formulae + casks for heuristic matching
-  # Notes: Only runs once per invocation
+  # Purpose: Build a newline list of Homebrew formulae+casks (legacy input for bins module)
   if [[ -n "$brew_formulae_file" ]]; then
     return 0
   fi
 
+  ensure_inventory
   brew_formulae_file="$(tmpfile)"
   : > "$brew_formulae_file"
 
-  if is_cmd brew; then
+  if [[ "$inventory_ready" == "true" && -n "$inventory_file" && -f "$inventory_file" ]]; then
+    # inventory.tsv columns: type, source, name, bundle_id, path
+    awk -F'\t' '$1=="brew"{print $3}' "$inventory_file" | sort -u >> "$brew_formulae_file" 2>/dev/null || true
+  elif is_cmd brew; then
+    # Fallback: direct brew listing
     log "Listing Homebrew formulae and casks..."
     brew list --formula >> "$brew_formulae_file" 2>/dev/null || true
     brew list --cask    >> "$brew_formulae_file" 2>/dev/null || true
@@ -99,17 +85,63 @@ ensure_brew_formulae() {
 }
 
 ensure_known_apps() {
-  # Purpose: Combine installed apps + brew inventory into a single known-app list
-  # Notes: Only runs once per invocation
+  # Purpose: Legacy mixed list used by launchd heuristics.
+  # For apps, we prefer paths; for brew, we include names.
   if [[ -n "$known_apps_file" ]]; then
     return 0
   fi
 
-  ensure_installed_apps
+  ensure_inventory
   ensure_brew_formulae
 
   known_apps_file="$(tmpfile)"
-  cat "$installed_apps_file" "$brew_formulae_file" > "$known_apps_file" 2>/dev/null || true
+  : > "$known_apps_file"
+
+  if [[ "$inventory_ready" == "true" && -n "$inventory_file" && -f "$inventory_file" ]]; then
+    awk -F'\t' '$1=="app"{print $5}' "$inventory_file" >> "$known_apps_file" 2>/dev/null || true
+    cat "$brew_formulae_file" >> "$known_apps_file" 2>/dev/null || true
+  else
+    # Minimal fallback: keep behavior predictable even if inventory failed
+    cat "$brew_formulae_file" >> "$known_apps_file" 2>/dev/null || true
+  fi
+
+  sort -u "$known_apps_file" -o "$known_apps_file" 2>/dev/null || true
+}
+
+ensure_installed_bundle_ids() {
+  # Purpose: Build newline list of CFBundleIdentifier values for installed .app bundles
+  # Source: inventory file when available; fallback to previous best-effort behavior.
+  if [[ -n "$installed_bundle_ids_file" ]]; then
+    return 0
+  fi
+
+  ensure_inventory
+
+  installed_bundle_ids_file="$(tmpfile)"
+  : > "$installed_bundle_ids_file"
+
+  if [[ "$inventory_ready" == "true" && -n "$inventory_file" && -f "$inventory_file" ]]; then
+    awk -F'\t' '$1=="app" && $4!="" && $4!="-"{print $4}' "$inventory_file" \
+      | sort -u >> "$installed_bundle_ids_file" 2>/dev/null || true
+    return 0
+  fi
+
+  # Fallback: scan /Applications and ~/Applications and read Info.plist
+  local apps_file
+  apps_file="$(tmpfile)"
+  find /Applications -maxdepth 2 -type d -name "*.app" > "$apps_file" 2>/dev/null || true
+  find "$HOME/Applications" -maxdepth 2 -type d -name "*.app" >> "$apps_file" 2>/dev/null || true
+
+  while IFS= read -r app; do
+    [[ -d "$app" ]] || continue
+    local plist="$app/Contents/Info.plist"
+    [[ -f "$plist" ]] || continue
+    local bid
+    bid="$(/usr/bin/defaults read "$plist" CFBundleIdentifier 2>/dev/null || true)"
+    [[ -n "$bid" ]] && echo "$bid" >> "$installed_bundle_ids_file"
+  done < "$apps_file"
+
+  sort -u "$installed_bundle_ids_file" -o "$installed_bundle_ids_file" 2>/dev/null || true
 }
 
 # ----------------------------
@@ -153,6 +185,7 @@ fi
 # ----------------------------
 case "$MODE" in
   scan)
+    ensure_inventory
     ensure_known_apps
     ensure_brew_formulae
     run_brew_module "false" "$BACKUP_DIR" "$EXPLAIN"
@@ -178,6 +211,7 @@ case "$MODE" in
       echo "Refusing to clean without --apply (safety default)"
       exit 1
     fi
+    ensure_inventory
     ensure_known_apps
     ensure_brew_formulae
     run_launchd_module "clean" "true" "$BACKUP_DIR" "$known_apps_file"
@@ -211,6 +245,7 @@ case "$MODE" in
     summary_add "intel: report written"
     ;;
   launchd-only)
+    ensure_inventory
     ensure_known_apps
     if [[ "$APPLY" != "true" ]]; then
       run_launchd_module "scan" "false" "$BACKUP_DIR" "$known_apps_file"
@@ -221,6 +256,7 @@ case "$MODE" in
     fi
     ;;
   bins-only)
+    ensure_inventory
     ensure_brew_formulae
     if [[ "$APPLY" != "true" ]]; then
       run_bins_module "scan" "false" "$BACKUP_DIR" "$brew_formulae_file"

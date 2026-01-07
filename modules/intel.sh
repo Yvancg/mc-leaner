@@ -51,24 +51,32 @@ run_intel_report() {
   fi
 
   # De-duplicate roots (Bash 3.2 compatible, preserves order)
-  # NOTE: with `set -u`, expanding an *unset* array triggers an error.
-  # Always initialize the arrays we expand.
-  local uniq_roots=()
+  # Guard against `set -u` edge cases by never expanding an unset array.
+  local -a uniq_roots
+  uniq_roots=()
+
   if [[ "${#roots[@]}" -gt 1 ]]; then
     local rr
     local seen
     local ur
+
     for rr in "${roots[@]}"; do
       [[ -n "$rr" ]] || continue
       seen="no"
-      for ur in "${uniq_roots[@]}"; do
-        if [[ "$ur" == "$rr" ]]; then
-          seen="yes"
-          break
-        fi
-      done
+
+      # Only iterate if we already have items.
+      if [[ "${#uniq_roots[@]}" -gt 0 ]]; then
+        for ur in "${uniq_roots[@]}"; do
+          if [[ "$ur" == "$rr" ]]; then
+            seen="yes"
+            break
+          fi
+        done
+      fi
+
       [[ "$seen" == "yes" ]] || uniq_roots+=("$rr")
     done
+
     roots=("${uniq_roots[@]}")
   fi
 

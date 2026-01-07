@@ -212,9 +212,15 @@ run_caches_module() {
 
   # Best-effort cleanup of temp files created by this module.
   _caches_cleanup_tmp() {
-    rm -f "$below_report_file" "$candidate_list_file" \
+    # NOTE: This trap can run after `run_caches_module` returns, when locals may be unset.
+    # Use `:-` defaults everywhere to avoid `set -u` unbound-variable failures.
+    rm -f \
+      "${below_report_file:-}" \
+      "${candidate_list_file:-}" \
       "${candidates_kb_path:-}" \
-      "${report_file:-}" "${report_file:-}.sorted" 2>/dev/null || true
+      "${report_file:-}" \
+      "${report_file:-}.sorted" \
+      2>/dev/null || true
   }
   trap _caches_cleanup_tmp EXIT
 

@@ -23,20 +23,28 @@ run_bins_module() {
   fi
 
   # ----------------------------
-  # Inventory (optional): build quick membership set
-  # ----------------------------
+  # Inventory (optional): build membership set (file of keys)
   local inv_keys_file=""
   if [[ -n "$inventory_index_file" && -s "$inventory_index_file" ]]; then
     inv_keys_file="$(mktemp -t mc-leaner_bins_invkeys.XXXXXX)"
     # inventory index format: key<TAB>name<TAB>source<TAB>path
     cut -f1 "$inventory_index_file" | LC_ALL=C sort -u > "$inv_keys_file" || true
-  fi
-
-  # Ensure temp file cleanup
-  if [[ -n "$inv_keys_file" ]]; then
     trap 'rm -f "$inv_keys_file" 2>/dev/null || true' RETURN
   fi
 
+  # Build a fast membership map for keys (awk associative array)
+  # Note: avoids O(N) grep per binary when /usr/local/bin is large.
+  local inv_keys_map=""
+  if [[ -n "$inv_keys_file" && -s "$inv_keys_file" ]]; then
+    inv_keys_map="$inv_keys_file"
+  fi
+
+  # Fast key lookup via awk map. Returns 0 (true) if key exists.
+  inv_has_key() {
+    local k="$1"
+    [[ -n "$inv_keys_map" && -s "$inv_keys_map" ]] || return 1
+    awk -v k="$k" 'BEGIN{found=0} $0==k{found=1; exit} END{exit(found?0:1)}' "$inv_keys_map" 2>/dev/null
+  }
   # ----------------------------
   # Heuristic scan
   # ----------------------------
@@ -83,8 +91,9 @@ run_bins_module() {
       local head1
       head1="$(head -n 1 "$bin_path" 2>/dev/null || true)"
       if [[ "$head1" == "#!"* ]]; then
+        # Only scan a small prefix to avoid reading large files.
         local app_ref
-        app_ref="$(grep -Eo '/Applications/[^\"\\n]+\.app' "$bin_path" 2>/dev/null | head -n 1 || true)"
+        app_ref="$(head -c 4096 "$bin_path" 2>/dev/null | grep -Eo '/Applications/[^\"\\n]+\.app' | head -n 1 || true)"
         if [[ -n "$app_ref" && -d "$app_ref" ]]; then
           log "SKIP (script shim references app): $bin_path -> $app_ref"
           continue
@@ -102,7 +111,7 @@ run_bins_module() {
 
     # Skip binaries that are known to be installed (brew formula/cask keys and app-derived keys)
     # Note: This is a best-effort guard; later we can add pkg receipts vs standalone binary detection.
-    if [[ -n "$inv_keys_file" ]] && grep -qxF "$base" "$inv_keys_file"; then
+    if inv_has_key "$base"; then
       log "SKIP (inventory match): $bin_path (key=$base)"
       continue
     fi

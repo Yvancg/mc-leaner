@@ -311,13 +311,26 @@ run_logs_module() {
       # For user-level Logs/<owner>, also show top subfolders for directories
       if [[ -d "$path" ]]; then
         explain_log "  Subfolders (top 3 by size):"
-        du -sk "$path"/* 2>/dev/null \
-          | sort -nr \
-          | head -n 3 \
-          | while read -r skb sub; do
-              local smb=$((skb / 1024))
-              explain_log "    - ${smb}MB | ${sub}"
-            done
+
+        # NOTE: with `set -euo pipefail`, a pipeline fails the whole script if any stage
+        # returns non-zero. When a directory has no children, the glob may not match and
+        # `du` can fail. Guard by checking for at least one child first.
+        local -a _children
+        _children=("$path"/*)
+        if [[ ${#_children[@]} -gt 0 && -e "${_children[0]}" ]]; then
+          # Best-effort; never abort the module on explain-only details.
+          du -sk "${_children[@]}" 2>/dev/null \
+            | sort -nr \
+            | head -n 3 \
+            | while IFS=$'\t' read -r skb sub; do
+                [[ -n "${skb:-}" && -n "${sub:-}" ]] || continue
+                local smb=$((skb / 1024))
+                explain_log "    - ${smb}MB | ${sub}"
+              done \
+            || true
+        else
+          explain_log "    (no subfolders)"
+        fi
       else
         _logs_rotations_summary "$path"
       fi

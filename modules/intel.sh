@@ -22,12 +22,33 @@ run_intel_report() {
   # ----------------------------
   # Scan roots
   # ----------------------------
-  local roots=(
-    "/Applications"
-    "$HOME/Applications"
-    "$HOME/Library"
-    "/opt"
-  )
+  # Default roots (safe, broad).
+  # If inventory is available, prefer scanning the concrete app bundle paths instead of whole directories.
+  local roots=()
+
+  if [[ "${INVENTORY_READY:-false}" == "true" && -n "${INVENTORY_FILE:-}" && -r "${INVENTORY_FILE:-}" ]]; then
+    # Inventory rows are tab-separated:
+    # app <source> <name> <bundle_id> <path>
+    # We scan app bundle paths directly for speed and accuracy.
+    while IFS=$'\t' read -r kind src name bid app_path; do
+      [[ "$kind" == "app" ]] || continue
+      [[ -n "$app_path" && "$app_path" == /* && -d "$app_path" ]] || continue
+      roots+=("$app_path")
+    done < "${INVENTORY_FILE}"
+
+    # Keep /opt for vendor tools and package installs.
+    roots+=("/opt")
+
+    # Keep user Library for plugins/executables that are not inside app bundles.
+    roots+=("$HOME/Library")
+  else
+    roots+=(
+      "/Applications"
+      "$HOME/Applications"
+      "$HOME/Library"
+      "/opt"
+    )
+  fi
 
   log "Scanning for Intel-only executables (informational)..."
 
@@ -73,26 +94,24 @@ run_intel_report() {
     # Defensive: must be a real file.
     [[ -n "$p" && "$p" == /* && -f "$p" ]] || continue
 
-    # Fast pre-filter: only consider Mach-O.
-    local fdesc
-    fdesc=$(file "$p" 2>/dev/null || true)
-    echo "$fdesc" | grep -q "Mach-O" || continue
-
     local archs=""
-
-    if [[ "$have_lipo" == "yes" ]]; then
-      archs=$(lipo -archs "$p" 2>/dev/null || true)
-    fi
-
-    # Fallback to `file` parsing if lipo fails/unavailable.
-    # We only need to know whether x86_64 is present and whether arm64/arm64e is present.
     local has_x86="no"
     local has_arm="no"
 
-    if [[ -n "$archs" ]]; then
-      echo "$archs" | grep -qw "x86_64" && has_x86="yes"
-      (echo "$archs" | grep -qw "arm64" || echo "$archs" | grep -qw "arm64e") && has_arm="yes"
-    else
+    # Prefer lipo first (much faster than `file` when it works).
+    if [[ "$have_lipo" == "yes" ]]; then
+      archs=$(lipo -archs "$p" 2>/dev/null || true)
+      if [[ -n "$archs" ]]; then
+        echo "$archs" | grep -qw "x86_64" && has_x86="yes"
+        (echo "$archs" | grep -qw "arm64" || echo "$archs" | grep -qw "arm64e") && has_arm="yes"
+      fi
+    fi
+
+    # If lipo did not provide arch info, fall back to `file`.
+    if [[ -z "$archs" ]]; then
+      local fdesc
+      fdesc=$(file "$p" 2>/dev/null || true)
+      echo "$fdesc" | grep -q "Mach-O" || continue
       echo "$fdesc" | grep -q "x86_64" && has_x86="yes"
       (echo "$fdesc" | grep -q "arm64" || echo "$fdesc" | grep -q "arm64e") && has_arm="yes"
     fi
@@ -106,7 +125,7 @@ run_intel_report() {
         printf "%s: Intel-only (x86_64)\n" "$p" >> "$tmp_out" 2>/dev/null || true
       fi
     fi
-  done < <(find "${roots[@]}" -type f -perm +111 -print 2>/dev/null)
+  done < <(find "${roots[@]}" -type f -perm -111 -print 2>/dev/null)
 
   # Finalize report: normalize and sort deterministically.
   # Keep one line per file by sorting on the path prefix before ':'

@@ -148,19 +148,33 @@ _inventory_scan_apps_root() {
 
   local app
   while IFS= read -r -d '' app; do
-    local base name bid
+    local base name bid effective_source target
     base="$(basename "$app")"
     name="${base%.app}"
+
+    # If the .app is a symlink, use its target to decide whether it is a system app.
+    # This matters on newer macOS builds where some Apple apps appear under /Applications
+    # but actually point into Cryptex or other system locations.
+    target="$(/usr/bin/stat -f%Y "$app" 2>/dev/null || true)"
+    if [[ -z "$target" ]]; then
+      target="$app"
+    fi
+
+    effective_source="$source"
+    if [[ "$target" == /System/Applications/* || "$target" == /System/Cryptexes/App/System/Applications/* ]]; then
+      effective_source="system"
+    fi
+
     bid="$(_inventory_bundle_id_for_app "$app")"
 
-    _inventory_add_row "app" "$source" "$name" "$bid" "$app" ""
+    _inventory_add_row "app" "$effective_source" "$name" "$bid" "$app" ""
 
     # Index keys
     if [[ -n "$bid" ]]; then
-      _inventory_add_index "$bid" "$name" "$source" "$app"
+      _inventory_add_index "$bid" "$name" "$effective_source" "$app"
     fi
-    _inventory_add_index "$(_inventory_normalize_app_key "$base")" "$name" "$source" "$app"
-    _inventory_add_index "$(_inventory_normalize_app_key "$name")" "$name" "$source" "$app"
+    _inventory_add_index "$(_inventory_normalize_app_key "$base")" "$name" "$effective_source" "$app"
+    _inventory_add_index "$(_inventory_normalize_app_key "$name")" "$name" "$effective_source" "$app"
   done < <(
     # Use `find -L` so we catch Apple Cryptex-installed apps that appear as symlinks in /Applications
     # (e.g. /Applications/Safari.app -> /System/Cryptexes/App/System/Applications/Safari.app).

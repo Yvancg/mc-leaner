@@ -217,16 +217,22 @@ fi
 case "$MODE" in
   scan)
     ensure_inventory
-    ensure_brew_formulae
-    ensure_known_apps
     ensure_brew_bins
+
     run_brew_module "false" "$BACKUP_DIR" "$EXPLAIN"
     summary_add "brew: inspected"
-    run_launchd_module "scan" "false" "$BACKUP_DIR" "$known_apps_file"
+
+    # Prefer inventory index lookups; keep known_apps_file as a legacy fallback input.
+    ensure_known_apps
+    run_launchd_module "scan" "false" "$BACKUP_DIR" "$inventory_index_file" "$known_apps_file"
     summary_add "launchd: inspected"
-    run_bins_module "scan" "false" "$BACKUP_DIR" "$brew_bins_file"
+
+    # Prefer brew executable basenames and inventory index for /usr/local/bin ownership.
+    run_bins_module "scan" "false" "$BACKUP_DIR" "$inventory_index_file" "$brew_bins_file"
     summary_add "bins: inspected"
-    run_caches_module "scan" "false" "$BACKUP_DIR"
+
+    # Use inventory index to label cache owners more accurately.
+    run_caches_module "scan" "false" "$BACKUP_DIR" "$inventory_index_file"
     summary_add "caches: inspected"
     run_logs_module "false" "$BACKUP_DIR" "$EXPLAIN" "50"
     summary_add "logs: inspected (threshold=50MB)"
@@ -244,14 +250,16 @@ case "$MODE" in
       exit 1
     fi
     ensure_inventory
-    ensure_brew_formulae
-    ensure_known_apps
     ensure_brew_bins
-    run_launchd_module "clean" "true" "$BACKUP_DIR" "$known_apps_file"
+
+    ensure_known_apps
+    run_launchd_module "clean" "true" "$BACKUP_DIR" "$inventory_index_file" "$known_apps_file"
     summary_add "launchd: cleaned"
-    run_bins_module "clean" "true" "$BACKUP_DIR" "$brew_bins_file"
+
+    run_bins_module "clean" "true" "$BACKUP_DIR" "$inventory_index_file" "$brew_bins_file"
     summary_add "bins: cleaned"
-    run_caches_module "clean" "true" "$BACKUP_DIR"
+
+    run_caches_module "clean" "true" "$BACKUP_DIR" "$inventory_index_file"
     summary_add "caches: cleaned"
     run_logs_module "true" "$BACKUP_DIR" "$EXPLAIN" "50"
     summary_add "logs: cleaned (threshold=50MB)"
@@ -281,10 +289,10 @@ case "$MODE" in
     ensure_inventory
     ensure_known_apps
     if [[ "$APPLY" != "true" ]]; then
-      run_launchd_module "scan" "false" "$BACKUP_DIR" "$known_apps_file"
+      run_launchd_module "scan" "false" "$BACKUP_DIR" "$inventory_index_file" "$known_apps_file"
       summary_add "launchd: inspected"
     else
-      run_launchd_module "clean" "true" "$BACKUP_DIR" "$known_apps_file"
+      run_launchd_module "clean" "true" "$BACKUP_DIR" "$inventory_index_file" "$known_apps_file"
       summary_add "launchd: cleaned"
     fi
     ;;
@@ -292,19 +300,21 @@ case "$MODE" in
     ensure_inventory
     ensure_brew_bins
     if [[ "$APPLY" != "true" ]]; then
-      run_bins_module "scan" "false" "$BACKUP_DIR" "$brew_bins_file"
+      run_bins_module "scan" "false" "$BACKUP_DIR" "$inventory_index_file" "$brew_bins_file"
       summary_add "bins: inspected"
     else
-      run_bins_module "clean" "true" "$BACKUP_DIR" "$brew_bins_file"
+      run_bins_module "clean" "true" "$BACKUP_DIR" "$inventory_index_file" "$brew_bins_file"
       summary_add "bins: cleaned"
     fi
     ;;
   caches-only)
     if [[ "$APPLY" != "true" ]]; then
-      run_caches_module "scan" "false" "$BACKUP_DIR"
+      ensure_inventory
+      run_caches_module "scan" "false" "$BACKUP_DIR" "$inventory_index_file"
       summary_add "caches: inspected"
     else
-      run_caches_module "clean" "true" "$BACKUP_DIR"
+      ensure_inventory
+      run_caches_module "clean" "true" "$BACKUP_DIR" "$inventory_index_file"
       summary_add "caches: cleaned"
     fi
     ;;

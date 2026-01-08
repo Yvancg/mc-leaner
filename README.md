@@ -18,6 +18,24 @@ No deletions.
 
 ---
 
+## Open source status
+
+mc-leaner is an **open-source project**.
+
+- The full inspection and safety logic is public and auditable.
+- All decisions made by the tool can be traced and explained.
+- Contributions, forks, and independent reviews are encouraged.
+
+The long-term direction of the project follows an **open-core model**:
+
+- This repository will remain open and focused on the core inspection engine.
+- Future commercial offerings, will be layered on top.
+- No proprietary features will be required to understand or trust what mc-leaner does.
+
+If you value transparency and control, this repository is the source of truth.
+
+---
+
 ## Philosophy
 
 mc-leaner is built on a simple idea:

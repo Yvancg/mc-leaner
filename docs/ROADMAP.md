@@ -115,6 +115,43 @@ Focus: **execution context and permissions visibility**
 
 ---
 
+## v1.6.0 (released)
+
+Focus: **inventory-first architecture and cross-module accuracy**
+
+### Implemented modules
+
+#### Inventory (inspection-only, foundational)
+
+- Build a unified inventory of installed software:
+  - System apps
+  - User apps
+  - Homebrew formulae and casks
+- Normalize names, bundle IDs, paths, and install sources
+- Serve as a shared read-only index for other modules
+- No cleanup actions, no mutations
+
+### Cross-module improvements
+
+- **Caches**
+  - Owner attribution now derived from Inventory when possible
+  - Reduced false “unknown owner” cases
+  - More accurate app naming (bundle ID → app name)
+- **App leftovers**
+  - Installed-match detection now uses Inventory instead of loose heuristics
+  - Improved bundle ID and group container correlation
+  - Fewer false positives for still-installed apps
+- **Launchd**
+  - LaunchAgent/Daemon inspection uses Inventory-backed matching
+  - Reduced reliance on static known-app lists
+- **/usr/local/bin**
+  - Binary ownership inference now aligns with Inventory and Homebrew data
+  - Clearer distinction between Homebrew-managed and standalone binaries
+
+Status: **stable, accuracy-focused release**
+
+---
+
 ## v2.x (medium term)
 
 Focus: **system intelligence and cross-module correlation**

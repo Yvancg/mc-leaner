@@ -44,6 +44,14 @@ If you want to understand what is running on your systemâ€”and clean it safelyâ€
 
 ## What mc-leaner does (current)
 
+### Inventory core (v1.6.0)
+
+- Introduces a centralized inventory index of installed software (apps, bundle IDs, Homebrew formulae and casks).
+- Used across modules to replace ad-hoc heuristics with consistent lookups.
+- Improves accuracy for ownership detection, installed-match decisions, and skip logic.
+- Runs once per execution and is reused by all inspection modules.
+- Fully explainable with --explain (sources, match type, normalization path).
+
 ### Launchd hygiene
 
 - Scans:
@@ -55,6 +63,7 @@ If you want to understand what is running on your systemâ€”and clean it safelyâ€
   - skipping known installed apps
   - skipping Homebrew-managed services
   - skipping known security and endpoint software
+- Uses inventory-based installed app and bundle-id resolution
 - Prompts before every action
 - Moves files to a **timestamped backup folder** on your Desktop
 - Supports `--explain` flag to provide detailed reasoning per item
@@ -66,6 +75,7 @@ If you want to understand what is running on your systemâ€”and clean it safelyâ€
 - Optionally inspects `/usr/local/bin` for legacy or unmanaged binaries
 - Conservative and heuristic-based by design
 - Supports `--explain` flag to clarify detection logic
+- Uses inventory-backed Homebrew and installed-software correlation
 
 ### Cache inspection (v1.1.0)
 
@@ -77,6 +87,7 @@ If you want to understand what is running on your systemâ€”and clean it safelyâ€
   - last modified time
   - best-effort owning app or bundle identifier
 - Groups caches by app for easier review
+- Uses inventory-backed owner labeling and reduced false "unknown owner"
 - `--explain` flag shows top subfolders by size within each cache
 - Inspection-first by default (no moves)
 - Optional cleanup:
@@ -154,6 +165,7 @@ This module will focus on **understanding Homebrew state**, not blindly cleaning
 - Uses bundle-id matching against installed apps to avoid false positives
 - Skips Apple/system-owned containers and protected software
 - Applies a size threshold (default: 50MB) to reduce noise
+- Uses inventory-first matching before heuristic normalization
 - Inspection-first by default (no moves)
 - Optional cleanup:
   - requires `--apply`

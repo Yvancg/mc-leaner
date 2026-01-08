@@ -10,6 +10,56 @@ This project follows a pragmatic versioning scheme:
 
 ---
 
+## v1.6.0 — Inventory core & system-wide hardening
+
+**Release date:** 2026-01-08
+
+### Added
+
+- Inventory core module
+  - Centralized discovery of installed applications, bundle identifiers, and executable roots
+  - Shared inventory used consistently by caches, leftovers, bins, launchd, and intel modules
+  - Lazy, on-demand population to reduce startup cost and unnecessary scans
+  - Explicit readiness checks to prevent partial or inconsistent state usage
+
+### Fixed
+
+- Unbound variable and array edge cases across modules under strict shell settings
+- Incorrect cache ownership reporting for Chromium-based applications
+- Inventory-dependent race conditions during explain-mode scans
+- Silent skips caused by missing or partially initialized shared state
+
+### Improved
+
+- Caches module
+  - Accurate owner attribution using inventory data (e.g. Google Chrome, WhatsApp)
+  - Correct handling of nested container caches and Apple-owned cache paths
+  - Reduced false positives and duplicate reporting
+  - Explain-mode now shows stable, user-meaningful ownership and decision paths
+
+- Leftovers module
+  - Stronger installed-app matching via inventory instead of heuristic-only name checks
+  - Improved handling of group containers and bundle-id prefixes
+  - Clearer explain output for skip reasons (installed, protected, below threshold)
+
+- Intel-only executable scan
+  - Stable root discovery via inventory-provided application paths
+  - Deduplicated scan roots and hardened array handling under `set -u`
+  - More accurate top-source aggregation
+
+- Orchestration and module boundaries
+  - Clear separation between inventory building and per-module inspection logic
+  - Reduced cross-module coupling and implicit dependencies
+  - More predictable execution order and explain output
+
+### Stability
+
+- Full end-to-end scan passes with `--explain` and strict error checking
+- No runtime errors across all modules in full system scans
+- Consistent run summary reporting across general and module-specific modes
+
+---
+
 ## 1.5.0 - Permissions inspection
 
 **Release date:** 2026-01-06

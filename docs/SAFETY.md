@@ -2,7 +2,7 @@
 
 This document explains the safety guarantees, assumptions, and limits of **mc-leaner**.
 
-mc-leaner is a maintenance tool. It is intentionally conservative.
+mc-leaner is a maintenance tool. It is intentionally conservative. Since v1.6.0, mc-leaner relies on a centralized inventory of installed software to reduce guesswork and false positives.
 
 ---
 
@@ -30,9 +30,17 @@ mc-leaner guarantees the following:
 - Each potentially destructive action requires confirmation
 - No batch or silent cleanup
 
+### 5. Inventory-first decisions
+
+- Cleanup decisions are based on a shared inventory of installed apps, bundle IDs, and package managers
+- Modules do not independently guess ownership when reliable inventory data exists
+- Heuristics are used only as a fallback
+
 ---
 
 ## Protected categories (hard skips)
+
+Items positively identified in the inventory as system-owned or actively installed are never flagged as leftovers.
 
 The following categories are **never touched** by mc-leaner:
 
@@ -59,7 +67,7 @@ These services may not have visible app bundles and removing them can break syst
 
 ## Heuristics and limitations
 
-mc-leaner relies on heuristics, not perfect knowledge.
+mc-leaner prefers inventory-backed knowledge and falls back to heuristics only when ownership cannot be determined.
 
 ### Launchd detection
 
@@ -69,14 +77,20 @@ A launchd plist may be flagged as orphaned if:
 - its label does not match known installed apps
 - it is not explicitly protected
 
-False positives are possible. Flagging does **not** mean removal is recommended.
+False positives are rare when inventory data is available. Flagging never implies removal is recommended.
 
 ### Binary inspection
 
 Checks in `/usr/local/bin` are heuristic:
 
 - manually installed tools may be flagged
-- Homebrew improves accuracy but is optional
+- Homebrew and package inventory data are used when available to improve accuracy
+
+### Inventory limitations
+
+- The inventory reflects the current system state at scan time
+- Manually removed or partially uninstalled software may still leave artifacts
+- Inventory data improves accuracy but does not guarantee completeness
 
 ### Intel-only reporting
 

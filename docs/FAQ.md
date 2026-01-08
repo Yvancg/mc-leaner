@@ -74,7 +74,7 @@ It scans user-level cache locations and highlights **large cache directories** b
 
 - total size
 - last modification time
-- owning app (best-effort)
+- owning app (derived from the Inventory when possible)
 - largest subfolders (with `--explain`)
 
 By default, nothing is moved or removed.
@@ -86,6 +86,28 @@ If you use `--apply`, mc-leaner will:
 - never delete anything
 
 This allows you to safely reclaim space without guessing.
+
+---
+
+## What is the Inventory module?
+
+The Inventory module (introduced in v1.6.0) is a **foundational inspection module**.
+
+It builds a live inventory of installed software, including:
+
+- system and user applications
+- application bundle identifiers
+- application paths
+- Homebrew formulae and casks
+
+This inventory is used internally by other modules to improve accuracy and reduce false positives.
+
+For example, it allows mc-leaner to:
+- correctly associate caches, logs, and leftovers with installed apps
+- distinguish real leftovers from data belonging to active software
+- avoid heuristic name matching when reliable identifiers are available
+
+The Inventory module does not remove, modify, or move anything. It exists purely to provide a reliable source of truth for other inspections.
 
 ---
 
@@ -146,7 +168,7 @@ It identifies **candidate leftover folders** that:
 
 - exceed conservative size thresholds
 - are not owned by protected Apple or security components
-- do not match currently installed applications
+- do not match currently installed applications according to the Inventory
 
 For each candidate, mc-leaner reports:
 
@@ -182,6 +204,8 @@ There is no automatic cleanup or uninstall actions.
 All output is informational unless future versions explicitly add safe, confirmed actions.
 
 The Homebrew module never removes, uninstalls, or modifies Homebrew state.
+
+As of v1.6.0, Homebrew data is also used by the Inventory module to improve ownership detection across other modules.
 
 ---
 

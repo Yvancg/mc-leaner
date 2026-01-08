@@ -103,6 +103,7 @@ It builds a live inventory of installed software, including:
 This inventory is used internally by other modules to improve accuracy and reduce false positives.
 
 For example, it allows mc-leaner to:
+
 - correctly associate caches, logs, and leftovers with installed apps
 - distinguish real leftovers from data belonging to active software
 - avoid heuristic name matching when reliable identifiers are available

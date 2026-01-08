@@ -265,51 +265,51 @@ Follow this flow to stay safe and avoid surprises.
 
 1. Clone the repository
 
-```bash
-git clone https://github.com/Yvancg/mc-leaner.git
-cd mc-leaner
-```
+  ```bash
+  git clone https://github.com/Yvancg/mc-leaner.git
+  cd mc-leaner
+  ```
 
 2. In your Terminal, run a safe scan first (default: dry-run)
 
-```bash
-bash mc-leaner.sh
-```
+  ```bash
+  bash mc-leaner.sh
+  ```
 
-Nothing is moved. This shows what *would* be flagged.
+  Nothing is moved. This shows what *would* be flagged.
 
 3. Inspect decisions with explanations (optional but recommended)
 
-```bash
-bash mc-leaner.sh --explain
-```
+  ```bash
+  bash mc-leaner.sh --explain
+  ```
 
-Use this to understand why items are flagged or skipped.
+  Use this to understand why items are flagged or skipped.
 
 4. Run one module at a time (recommended)
 
-Examples:
+  Examples:
 
-```bash
-bash mc-leaner.sh --mode launchd-only --explain
-bash mc-leaner.sh --mode bins-only --explain
-bash mc-leaner.sh --mode caches-only --explain
-bash mc-leaner.sh --mode logs-only --explain
-bash mc-leaner.sh --mode leftovers-only --explain
-bash mc-leaner.sh --mode brew-only --explain
-bash mc-leaner.sh --mode permissions-only --explain
-bash mc-leaner.sh --mode intel-only
-```
+  ```bash
+  bash mc-leaner.sh --mode launchd-only --explain
+  bash mc-leaner.sh --mode bins-only --explain
+  bash mc-leaner.sh --mode caches-only --explain
+  bash mc-leaner.sh --mode logs-only --explain
+  bash mc-leaner.sh --mode leftovers-only --explain
+  bash mc-leaner.sh --mode brew-only --explain
+  bash mc-leaner.sh --mode permissions-only --explain
+  bash mc-leaner.sh --mode intel-only
+  ```
 
-**Note:** `intel-only` is a reporting-only mode. It never performs cleanup actions and does not support `--apply`.
+  **Note:** `intel-only` is a reporting-only mode. It never performs cleanup actions and does not support `--apply`.
 
 5. Apply moves only when you are ready
 
-```bash
-bash mc-leaner.sh --mode leftovers-only --apply
-```
+  ```bash
+  bash mc-leaner.sh --mode leftovers-only --apply
+  ```
 
-You will be prompted per item. Files are **moved to a backup folder**, never deleted.
+  You will be prompted per item. Files are **moved to a backup folder**, never deleted.
 
 6. Restore if needed
 

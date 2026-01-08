@@ -81,8 +81,9 @@ run_caches_module() {
     # Safe exact-key match (case-insensitive) without regex pitfalls.
     # Prints: "Name (src)|path" when available, else best-effort.
     out="$(
-      awk -F'\t' -v k="$key" 'BEGIN{IGNORECASE=1}
-        $1==k {
+      awk -F'\t' -v k="$key" '
+        function lc(s){ return tolower(s) }
+        lc($1)==lc(k) {
           name=($2!=""?$2:"");
           src=($3!=""?$3:"");
           path=($4!=""?$4:"");
@@ -289,6 +290,11 @@ run_caches_module() {
     while IFS=$'\t' read -r kb d; do
       [[ -n "$kb" && -n "$d" ]] || continue
       [[ -d "$d" ]] || continue
+
+      # Skip Apple/system container caches (noise, not user cleanup material)
+      if [[ "$d" == "$home/Library/Containers/com.apple."*"/Data/Library/Caches" ]]; then
+        continue
+      fi
 
       scanned_dirs=$((scanned_dirs + 1))
       local mb=$((kb / 1024))

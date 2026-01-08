@@ -74,21 +74,27 @@ run_caches_module() {
     # Index format (expected): key<TAB>name<TAB>source<TAB>path
     # Defensive: tolerate variable field counts.
     local key="$1"
+    local out
 
     _inventory_ready || return 1
 
     # Safe exact-key match (case-insensitive) without regex pitfalls.
     # Prints: "Name (src)|path" when available, else best-effort.
-    awk -F'\t' -v k="$key" 'BEGIN{IGNORECASE=1}
-      $1==k {
-        name=($2!=""?$2:"");
-        src=($3!=""?$3:"");
-        path=($4!=""?$4:"");
-        if (name!="" && path!="") { print name " (" src ")|" path; exit }
-        if (name!="") { print name; exit }
-        print $0; exit
-      }
-    ' "${INVENTORY_INDEX_FILE}" 2>/dev/null
+    out="$(
+      awk -F'\t' -v k="$key" 'BEGIN{IGNORECASE=1}
+        $1==k {
+          name=($2!=""?$2:"");
+          src=($3!=""?$3:"");
+          path=($4!=""?$4:"");
+          if (name!="" && path!="") { print name " (" src ")|" path; exit }
+          if (name!="") { print name; exit }
+          print $0; exit
+        }
+      ' "${INVENTORY_INDEX_FILE}" 2>/dev/null
+    )"
+
+    [[ -n "$out" ]] || return 1
+    echo "$out"
   }
 
   _inventory_label_from_bundle_id() {
@@ -100,7 +106,7 @@ run_caches_module() {
 
     # 1) direct bundle id key
     key="$bid"
-    if out="$(_inventory_lookup "$key" 2>/dev/null)"; then
+    if out="$(_inventory_lookup "$key" 2>/dev/null)" && [[ -n "$out" ]]; then
       echo "$out"
       return 0
     fi
@@ -108,7 +114,7 @@ run_caches_module() {
     # 2) strip leading TEAMID. (e.g., EQHXZ8M8AV.group.com.google.drivefs -> group.com.google.drivefs)
     if [[ "$bid" =~ ^[A-Z0-9]{10}\.(.+)$ ]]; then
       key="${BASH_REMATCH[1]}"
-      if out="$(_inventory_lookup "$key" 2>/dev/null)"; then
+      if out="$(_inventory_lookup "$key" 2>/dev/null)" && [[ -n "$out" ]]; then
         echo "$out"
         return 0
       fi
@@ -117,7 +123,7 @@ run_caches_module() {
     # 3) strip group. prefix (common for group containers)
     if [[ "$bid" =~ ^group\.(.+)$ ]]; then
       key="${BASH_REMATCH[1]}"
-      if out="$(_inventory_lookup "$key" 2>/dev/null)"; then
+      if out="$(_inventory_lookup "$key" 2>/dev/null)" && [[ -n "$out" ]]; then
         echo "$out"
         return 0
       fi
@@ -135,7 +141,7 @@ run_caches_module() {
     key="$(_norm_key "$name")"
     [[ -n "$key" ]] || return 1
 
-    if out="$(_inventory_lookup "$key" 2>/dev/null)"; then
+    if out="$(_inventory_lookup "$key" 2>/dev/null)" && [[ -n "$out" ]]; then
       echo "$out"
       return 0
     fi
@@ -149,6 +155,25 @@ run_caches_module() {
     local p="$1"
     local base out
     base="$(basename "$p")"
+
+    # 0) Treat Apple container caches as protected system-owned.
+    # Avoid surfacing them as user cleanup candidates.
+    if [[ "$p" == "$HOME/Library/Containers/com.apple."*"/Data/Library/Caches"* ]] || \
+       [[ "$p" == "$HOME/Library/Group Containers/group.com.apple."* ]]; then
+      echo "Apple (system)"
+      return 0
+    fi
+
+    # 0b) Improve labeling for shared Google cache root.
+    # On your system this is dominated by Chrome profiles.
+    if [[ "$p" == "$HOME/Library/Caches/Google" ]]; then
+      if [[ -d "$p/Chrome" ]]; then
+        echo "Google Chrome"
+      else
+        echo "Google (shared)"
+      fi
+      return 0
+    fi
 
     # 1) Container cache pattern: ~/Library/Containers/<bundle-id>/Data/Library/Caches
     if [[ "$p" == *"/Library/Containers/"*"/Data/Library/Caches"* ]]; then
@@ -187,7 +212,7 @@ run_caches_module() {
     fi
 
     # 3) Non bundle-id folder name (e.g. Google, Chrome, Microsoft). Try inventory normalized name.
-    if out="$(_inventory_label_from_name "$base" 2>/dev/null)"; then
+    if out="$(_inventory_label_from_name "$base" 2>/dev/null)" && [[ -n "$out" ]]; then
       echo "$out" | awk -F'\|' '{print $1}'
       return 0
     fi
@@ -237,6 +262,11 @@ run_caches_module() {
     while IFS=$'\t' read -r kb d; do
       [[ -n "$kb" && -n "$d" ]] || continue
       [[ -d "$d" ]] || continue
+
+      # Skip Apple/system container caches (noise, not user cleanup material)
+      if [[ "$d" == "$home/Library/Containers/com.apple."*"/Data/Library/Caches"* ]]; then
+        continue
+      fi
 
       scanned_dirs=$((scanned_dirs + 1))
       local mb=$((kb / 1024))
@@ -326,6 +356,11 @@ run_caches_module() {
     mb=$((kb / 1024))
     mod="$(_mtime "$d")"
     owner="$(_guess_owner_app "$d")"
+
+    # Skip protected Apple/system cache locations from reporting/relocation
+    if [[ "$owner" == "Apple (system)" ]]; then
+      continue
+    fi
 
     # Format: owner|mb|mtime|path
     printf "%s|%s|%s|%s\n" "$owner" "$mb" "$mod" "$d" >>"$report_file"

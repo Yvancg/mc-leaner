@@ -5,6 +5,23 @@ Thank you for your interest in contributing to **mc-leaner**.
 This project prioritizes **safety, clarity, and reversibility** over feature velocity. Please read this document carefully before proposing changes.
 
 ---
+## Open source and contribution scope
+
+mc-leaner follows an **open-core model**.
+
+This repository contains the **core inspection engine** and is intended to remain fully open source:
+- inspection logic
+- safety rules
+- decision-making code
+- reporting and explainability
+
+Contributions to this repository should focus on improving the **core**, not on building product layers.
+
+Future commercial components (such as GUI, packaging, distribution, or support tooling) will live outside this repository and are **out of scope** here.
+
+Contributing to mc-leaner means contributing to transparency, correctness, and user trust.
+
+---
 
 ## Core principles (non-negotiable)
 

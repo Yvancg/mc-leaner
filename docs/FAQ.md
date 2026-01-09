@@ -234,6 +234,30 @@ Automatic deletion would violate all three.
 
 ---
 
+---
+## Is mc-leaner really open source, and will it stay that way?
+
+Yes.
+
+mc-leaner follows an **open-core model**:
+
+- The core inspection engine, safety logic, and decision-making code are fully open source.
+- This repository remains the reference implementation for how mc-leaner works.
+- Anyone can audit, fork, or build on top of the core logic.
+
+In the future, there will be **commercial layers** built on top of this core, such as:
+
+- a graphical interface
+- packaged distributions
+- signed binaries
+- convenience or support features
+
+These layers will not be required to understand, verify, or trust mc-leaner’s behavior.
+
+Transparency is not a feature. It is the foundation of the project.
+
+---
+
 ## Will mc-leaner add a GUI?
 
 Possibly, but not at the expense of transparency.

@@ -234,7 +234,6 @@ Automatic deletion would violate all three.
 
 ---
 
----
 ## Is mc-leaner really open source, and will it stay that way?
 
 Yes.

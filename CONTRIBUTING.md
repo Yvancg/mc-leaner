@@ -5,11 +5,13 @@ Thank you for your interest in contributing to **mc-leaner**.
 This project prioritizes **safety, clarity, and reversibility** over feature velocity. Please read this document carefully before proposing changes.
 
 ---
+
 ## Open source and contribution scope
 
 mc-leaner follows an **open-core model**.
 
 This repository contains the **core inspection engine** and is intended to remain fully open source:
+
 - inspection logic
 - safety rules
 - decision-making code

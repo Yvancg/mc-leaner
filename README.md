@@ -62,13 +62,31 @@ If you want to understand what is running on your system—and clean it safely�
 
 ## What mc-leaner does (current)
 
-### Inventory core (v1.6.0)
+As of v2.0.0, all modules follow a strict inspection-first contract and share a unified inventory core.
+
+### Inventory core (v2.0.0 – contract)
 
 - Introduces a centralized inventory index of installed software (apps, bundle IDs, Homebrew formulae and casks).
 - Used across modules to replace ad-hoc heuristics with consistent lookups.
 - Improves accuracy for ownership detection, installed-match decisions, and skip logic.
 - Runs once per execution and is reused by all inspection modules.
 - Fully explainable with --explain (sources, match type, normalization path).
+- Acts as the single source of truth for ownership, installed-state, and skip decisions across all modules.
+
+### Startup inspection (v2.0.0)
+
+- Inspects system and user startup mechanisms without modifying state
+- Sources include:
+  - launchd agents and daemons
+  - login items
+- Classifies startup entries by:
+  - boot vs login
+  - source type (LaunchAgent, LaunchDaemon, LoginItem)
+  - owner (Apple system, installed app, unknown)
+- Uses inventory to resolve known apps and bundle identifiers
+- Flags unknown or unmanaged startup items for review
+- Inspection-only; no cleanup actions are performed
+- Fully explainable with --explain
 
 ### Launchd hygiene
 
@@ -272,6 +290,9 @@ mc-leaner uses a small set of global flags that apply consistently across all mo
 - `--help`  
   Prints a short help message with available modes and exits.
 
+- `--mode startup-only`  
+  Runs startup inspection module only (inspection-first, no cleanup).
+
 **Important:**  
 If mc-leaner cannot prompt for confirmation (non-interactive run), cleanup actions are skipped automatically for safety.
 
@@ -356,6 +377,7 @@ mc-leaner/
 │   ├── brew.sh           # Homebrew hygiene (inspection-only, implemented)
 │   ├── leftovers.sh      # app leftovers inspection (implemented)
 │   ├── logs.sh           # log inspection (implemented)
+│   ├── startup.sh        # startup and login item inspection (inspection-only)
 │   └── permissions.sh    # execution context & permission inspection
 ├── lib/
 │   ├── cli.sh
@@ -382,7 +404,7 @@ mc-leaner/
 
 ## Roadmap (high level)
 
-mc-leaner’s core inspection modules are now in place. Future work focuses on refinement, clarity, and edge-case hardening.
+With v2.0.0, mc-leaner stabilizes its module contracts, inventory model, and output format. Future releases will focus on depth rather than breadth.
 
 Planned directions:
 
@@ -402,6 +424,7 @@ Planned directions:
   - Stability guarantees per module
 
 Explicitly **out of scope**:
+
 - Automatic cleanup
 - Background agents or scheduled runs
 - Deletion-based workflows

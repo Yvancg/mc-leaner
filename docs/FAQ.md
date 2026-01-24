@@ -10,6 +10,7 @@ mc-leaner is **safe by default**:
 - It never deletes files
 - All changes are reversible via a backup folder
 - Security and endpoint protection software is always skipped
+- All modules in v2.0.0 follow an inspection-first contract with explicit user confirmation for any changes
 
 That said, mc-leaner is a **power tool**. You are expected to read prompts and understand what you approve.
 
@@ -91,7 +92,7 @@ This allows you to safely reclaim space without guessing.
 
 ## What is the Inventory module?
 
-The Inventory module (introduced in v1.6.0) is a **foundational inspection module**.
+The Inventory module (introduced in v1.6.0, contract-locked in v2.0.0) is a **foundational inspection module**.
 
 It builds a live inventory of installed software, including:
 
@@ -99,6 +100,8 @@ It builds a live inventory of installed software, including:
 - application bundle identifiers
 - application paths
 - Homebrew formulae and casks
+
+In v2.0.0, the Inventory is the single source of truth for ownership and matching across all inspection modules.
 
 This inventory is used internally by other modules to improve accuracy and reduce false positives.
 
@@ -187,6 +190,29 @@ With `--apply`, mc-leaner:
 - never deletes anything
 
 All decisions are explicit and reversible.
+
+---
+
+## What does the Startup module do?
+
+The Startup module is introduced in v2.0.0.
+
+It inspects startup-related execution paths including LaunchAgents, LaunchDaemons, and Login Items.
+
+The module is inspection-first and does not disable, unload, or remove anything automatically.
+
+It reports:
+
+- trigger type (boot or login)
+- source type (LaunchAgent, LaunchDaemon, Login Item)
+- label
+- executable path
+- inferred owner (via Inventory)
+- why an item is flagged
+
+Items with unknown or ambiguous ownership are flagged for review.
+
+Apple system and protected services are reported but never modified.
 
 ---
 
@@ -298,7 +324,7 @@ See CONTRIBUTING.md for details.
 
 mc-leaner only runs modules explicitly selected by the chosen mode.
 
-The default scan mode runs all inspection modules but performs no destructive actions.
+The default scan mode runs all inspection modules, including new ones introduced in v2.0.0 such as Startup, but performs no destructive actions.
 
 Any file movement or cleanup requires explicit use of `--apply`.
 

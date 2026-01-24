@@ -152,6 +152,40 @@ Status: **stable, accuracy-focused release**
 
 ---
 
+## v2.0.0 (released)
+
+Focus: **contract-locked modules and startup visibility**
+
+v2.0.0 formalizes mc-leaner’s module contract and introduces startup inspection as a first-class concern.
+All modules now follow a consistent interface, output format, and safety model.
+
+### Implemented modules
+
+#### Startup (inspection-first)
+
+- Inspect startup-related execution points:
+  - LaunchAgents
+  - LaunchDaemons
+  - Login Items
+- Classify startup timing (boot, login, on-demand)
+- Distinguish user vs system scope
+- Attribute owner when possible (Apple, vendor, user, unknown)
+- Explain mode describing why each item exists and why it is flagged
+- No automatic disabling or removal
+
+### Structural guarantees
+
+- Explicit module contract:
+  - Inspection-first
+  - No silent actions
+  - Reversible cleanup only when explicitly requested
+- Consistent logging, explain output, and summary reporting across all modules
+- Inventory locked as the single source of truth for ownership and correlation
+
+Status: **stable major release**
+
+---
+
 ## v2.x (medium term)
 
 Focus: **system intelligence and cross-module correlation**
@@ -160,13 +194,6 @@ v2.x deepens mc-leaner’s inspection capabilities by connecting signals across 
 This phase remains strictly CLI-first and inspection-only.
 
 ### Planned modules
-
-#### Startup & execution graph
-
-- Correlate LaunchAgents, LaunchDaemons, login items, and app helpers
-- Show execution timing (boot, login, on-demand)
-- Distinguish user vs system scope
-- Explain mode describing launch relationships
 
 #### Disk usage attribution
 

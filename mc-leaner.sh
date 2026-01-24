@@ -31,6 +31,33 @@ source "$ROOT_DIR/modules/brew.sh"
 source "$ROOT_DIR/modules/leftovers.sh"
 source "$ROOT_DIR/modules/permissions.sh"
 
+source "$ROOT_DIR/modules/startup.sh"
+
+# ----------------------------
+# Startup module function shim
+# ----------------------------
+# The startup module is newer and may export different entrypoint names.
+# Standard contract is `run_startup_module`, but support older names too.
+if ! declare -F run_startup_module >/dev/null 2>&1; then
+  run_startup_module() {
+    if declare -F run_startup >/dev/null 2>&1; then
+      run_startup "$@"
+      return $?
+    fi
+    if declare -F startup_module >/dev/null 2>&1; then
+      startup_module "$@"
+      return $?
+    fi
+    if declare -F startup_inspect >/dev/null 2>&1; then
+      startup_inspect "$@"
+      return $?
+    fi
+
+    log "Startup module not available: expected function run_startup_module (or fallback name) not found."
+    return 127
+  }
+fi
+
 
 # ----------------------------
 # Inventory-backed context builders
@@ -238,6 +265,9 @@ case "$MODE" in
     summary_add "logs: inspected (threshold=50MB)"
     run_permissions_module "false" "$BACKUP_DIR" "$EXPLAIN"
     summary_add "permissions: inspected"
+    # Startup inspection (inspection-only; never modifies system state)
+    run_startup_module "scan" "false" "$BACKUP_DIR" "$EXPLAIN" "$inventory_index_file"
+    summary_add "startup: inspected"
     ensure_installed_bundle_ids
     run_leftovers_module "false" "$BACKUP_DIR" "$EXPLAIN" "$installed_bundle_ids_file"
     summary_add "leftovers: inspected (threshold=50MB)"
@@ -265,6 +295,9 @@ case "$MODE" in
     summary_add "logs: cleaned (threshold=50MB)"
     run_permissions_module "true" "$BACKUP_DIR" "$EXPLAIN"
     summary_add "permissions: cleaned"
+    # Startup inspection (inspection-only; never modifies system state)
+    run_startup_module "scan" "false" "$BACKUP_DIR" "$EXPLAIN" "$inventory_index_file"
+    summary_add "startup: inspected"
     ensure_installed_bundle_ids
     run_leftovers_module "true" "$BACKUP_DIR" "$EXPLAIN" "$installed_bundle_ids_file"
     summary_add "leftovers: cleaned (threshold=50MB)"
@@ -339,6 +372,11 @@ case "$MODE" in
   brew-only)
     run_brew_module "false" "$BACKUP_DIR" "$EXPLAIN"
     summary_add "brew: inspected"
+    ;;
+  startup-only)
+    ensure_inventory
+    run_startup_module "scan" "false" "$BACKUP_DIR" "$EXPLAIN" "$inventory_index_file"
+    summary_add "startup: inspected"
     ;;
   *)
     echo "Unknown mode: $MODE"

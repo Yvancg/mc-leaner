@@ -1,5 +1,6 @@
 # Changelog
 
+
 All notable changes to this project are documented in this file.
 
 This project follows a pragmatic versioning scheme:
@@ -7,6 +8,56 @@ This project follows a pragmatic versioning scheme:
 - MAJOR.MINOR.PATCH
 - v1.0.x is maintenance and bugfix-only
 - New features land in minor releases (v1.1, v1.2, …)
+---
+
+## v2.0.0 — Contracted core, startup inspection & system lenses
+
+**Release date:** 2026-01-24
+
+This release locks the module contract and output format for the v2 series.  
+All inspections now rely on a shared, explicit inventory layer and follow a consistent, explainable decision model.
+
+### Added
+
+- Startup inspection module
+  - Inspects LaunchDaemons, LaunchAgents, and Login Items
+  - Classifies startup scope (boot vs login), source, owner, and execution path
+  - Flags unknown or non-inventory-backed startup entries
+  - Inspection-first design with no destructive actions
+
+- Inventory-driven system lenses
+  - Startup, caches, bins, launchd, leftovers, and intel modules now rely on inventory as the single source of truth
+  - Eliminates heuristic-only ownership detection and cross-module duplication
+
+### Changed
+
+- Module contract (v2)
+  - Standardized entrypoint naming (`run_<module>_module`)
+  - Unified logging, explain output, and run summary semantics
+  - Clear separation between discovery (inventory) and inspection logic
+
+- Orchestration
+  - Deterministic module ordering
+  - Explicit module availability checks with graceful degradation
+  - Predictable behavior across `scan`, `clean`, and module-specific modes
+
+### Improved
+
+- Startup analysis
+  - Clearer owner attribution (Apple, user, third-party, unknown)
+  - Reduced false positives for system-managed services
+  - Explain output shows why an item is considered safe, unknown, or skipped
+
+- Safety and resilience
+  - Hardened strict-shell behavior across all modules
+  - No silent failures under `set -u`
+  - Consistent non-destructive guarantees across inspection modules
+
+### Stability
+
+- Full-system scan and clean passes without runtime errors
+- Explain-mode coverage for all inspection decisions
+- Locked output format suitable for scripting and long-term support
 
 ---
 

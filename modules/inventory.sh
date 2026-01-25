@@ -1,16 +1,30 @@
 #!/usr/bin/env bash
-# mc-leaner: inventory module
-# Purpose:
-#   Build a canonical inventory of installed software (apps + Homebrew) so other
-#   modules can map folders/files to an installed owner.
-# Output:
-#   - INVENTORY_FILE: TSV authoritative list
-#   - INVENTORY_INDEX_FILE: TSV lookup index
+# shellcheck shell=bash
+# mc-leaner: inventory
 #
-# TSV columns (INVENTORY_FILE):
-#   kind\tsource\tname\tbundle_id\tapp_path\tbrew_id
-# TSV columns (INVENTORY_INDEX_FILE):
-#   key\tname\tsource\tapp_path
+# Purpose:
+#   Build a canonical inventory of installed software so other modules can attribute
+#   files/folders to an installed owner.
+#
+# Contract:
+#   - Inspection-only. No deletions, moves, or system changes.
+#   - Produces TSV artifacts and exports globals for cross-module lookups.
+#
+# Inputs:
+#   - Filesystem app roots: /System/Applications, /Applications, $HOME/Applications
+#   - Optional: Homebrew (if `brew` is present)
+#
+# Outputs (exported globals):
+#   - INVENTORY_FILE (TSV): kind\tsource\tname\tbundle_id\tapp_path\tbrew_id
+#   - INVENTORY_INDEX_FILE (TSV): key\tname\tsource\tapp_path
+#   - INVENTORY_READY: true/false
+#   - INVENTORY_BREW_BINS_FILE (optional): newline list of brew executable basenames
+#   - INVENTORY_BREW_BINS_READY: true/false
+#   - INVENTORY_CACHE_READY: true/false (associative-array cache when supported)
+#
+# Notes:
+#   - App discovery uses `find -L` to capture symlinked Apple apps (Cryptex).
+#   - Bundle id resolution is best-effort (mdls, then Info.plist).
 
 set -uo pipefail
 

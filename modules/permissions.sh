@@ -1,4 +1,5 @@
 #!/bin/bash
+# shellcheck shell=bash
 # mc-leaner: permissions & environment diagnostics
 # Purpose: explain why some paths cannot be inspected/moved (TCC, SIP, non-interactive shell)
 # Safety: inspection-only; no file moves, no privilege escalation, no destructive operations

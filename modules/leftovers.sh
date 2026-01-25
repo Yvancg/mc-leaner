@@ -1,37 +1,38 @@
 #!/bin/bash
+# shellcheck shell=bash
 # mc-leaner: leftovers module (inspection-first)
 #
 # Purpose
 # - Identify user-level application leftovers (support files) for apps that no longer appear installed.
 # - Inspection-first: report findings; optional relocation only when --apply is used.
 #
-# Scope (user-level only)
-# - ~/Library/Application Support
-# - ~/Library/Containers
-# - ~/Library/Group Containers
-# - ~/Library/Saved Application State
-# - ~/Library/Preferences  (report-only in v1.4.0; no moves)
-#
-# Safety rules
-# - Never touch system-level paths.
-# - Never delete; relocation only to backup dir.
+# Contract
+# - Entry point: run_leftovers_module <apply> <backup_dir> [explain] [inventory_file] [inventory_index_file]
+# - Never delete; relocation only (mv) to backup_dir.
 # - Prefer false negatives over false positives.
 #
 # Inputs
 # - apply: "true" or "false"
 # - backup_dir: destination for relocation when apply=true (reversible)
 # - explain: "true" or "false" (verbose reasoning)
-# - inventory_file: inventory.tsv produced by modules/inventory.sh (contains installed apps + brew)
+# - inventory_file: inventory.tsv produced by modules/inventory.sh
+# - inventory_index_file: inventory.index.tsv (optional; auto-built fallback if missing)
 #
-# Output
-# - Groups by inferred owner (bundle id or app name)
-# - Reports size and last modified time (best-effort)
+# Outputs (exported globals)
+# - LEFTOVERS_FLAGGED_COUNT: number of LEFTOVER? findings emitted
+# - LEFTOVERS_FLAGGED_ITEMS: array of pre-formatted summary lines
+# - LEFTOVERS_MOVE_FAILURES: array of pre-formatted move failure lines (apply-mode)
+#
+# Scope (user-level only)
+# - ~/Library/Application Support
+# - ~/Library/Containers
+# - ~/Library/Group Containers
+# - ~/Library/Saved Application State
+# - ~/Library/Preferences (report-only by default; no moves)
 #
 # Notes
-# - Mapping of folder names to apps is heuristic-based. We prioritize safety and clarity.
-# - In v1.4.0 we mainly target bundle-id named folders (e.g. com.vendor.App).
-# - Later versions may expand mapping using LaunchServices metadata or Spotlight.
-
+# - Owner/app inference is heuristic-based.
+# - Apple/system-owned containers are treated as protected and skipped.
 
 set -euo pipefail
 

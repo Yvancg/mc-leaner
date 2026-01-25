@@ -1,9 +1,9 @@
 #!/bin/bash
+# shellcheck shell=bash
 # mc-leaner: brew module (inspection-first)
 # Purpose: provide visibility into Homebrew state and disk usage
 # Safety: read-only; does NOT run brew cleanup/uninstall/upgrade; no filesystem writes
 # Notes: best-effort parsing; macOS default bash 3.2 compatible
-
 
 set -euo pipefail
 

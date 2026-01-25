@@ -1,4 +1,5 @@
 #!/bin/bash
+# shellcheck shell=bash
 # mc-leaner: launchd hygiene module
 # Purpose: Heuristically identify orphaned LaunchAgents and LaunchDaemons and optionally relocate their plists to backups
 # Safety: Defaults to dry-run; never deletes; moves require explicit `--apply` and per-item confirmation; hard-skips security software

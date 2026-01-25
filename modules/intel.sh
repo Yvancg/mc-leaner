@@ -1,4 +1,5 @@
 #!/bin/bash
+# shellcheck shell=bash
 # mc-leaner: intel module
 # Purpose: Report Intel-only (x86_64) Mach-O executables for visibility on Apple Silicon systems
 # Safety: Reporting-only. Never modifies, moves, or deletes files.

@@ -1,5 +1,13 @@
 # mc-leaner
 
+![McLeaner Logo](assets/logo/mcleaner-logo_Image.svg)
+
+![macOS](https://img.shields.io/badge/macOS-supported-brightgreen)
+![Bash](https://img.shields.io/badge/bash-3.2%2B-blue)
+![License](https://img.shields.io/badge/license-MIT-lightgrey)
+![Status](https://img.shields.io/badge/status-early--but--stable-orange)
+[![Security Policy](https://img.shields.io/badge/security-policy-blue)](SECURITY.md)
+
 **mc-leaner** is a safe-by-default macOS inspection and cleanup tool for people who want **control, not magic**.
 
 It helps you **identify what is running, consuming space, or lingering on your system**, and clean it **only when you explicitly choose to**.

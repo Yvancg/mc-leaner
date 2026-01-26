@@ -21,7 +21,7 @@ This project follows a pragmatic versioning scheme:
   - Flags paths above the configured threshold and summarizes total flagged size
 
 - Flagged item identifier exports
-  - All flag-capable modules now export newline-delimited `*_FLAGGED_IDS_LIST` variables
+  - Flag-capable modules now export newline-delimited *_FLAGGED_IDS_LIST variables (startup, launchd, caches, logs, leftovers, disk).
   - Enables consistent, structured reporting of *what* was flagged, not just counts
 
 - Clean, multi-line run summary output

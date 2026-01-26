@@ -210,6 +210,7 @@ run_logs_module() {
 
   # End-of-run contract arrays
   local -a flagged_items=()
+  local -a flagged_ids=()
   local -a move_failures=()
   local moved_count=0
 
@@ -313,6 +314,7 @@ run_logs_module() {
     log "LOG? ${mb}MB | modified: ${mod} | path: ${path}"
     # End-of-run summary: aggregate flagged items
     flagged_items+=("${mb}MB | modified: ${mod} | owner: ${owner} | ${path}")
+    flagged_ids+=("${path}")
 
     # Explain output: rotations + reason
     if [[ "${EXPLAIN:-false}" == "true" ]]; then
@@ -406,6 +408,10 @@ run_logs_module() {
   fi
 
   log "Logs: total large log items (by threshold): ${total_mb}MB"
+
+  # Export flagged identifiers list (paths) for run summary consumption.
+  LOGS_FLAGGED_IDS_LIST="$(printf '%s\n' "${flagged_ids[@]}")"
+  LOGS_FLAGGED_COUNT="${#flagged_ids[@]}"
 
   # ----------------------------
   # Global summary contribution

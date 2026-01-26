@@ -351,6 +351,7 @@ run_caches_module() {
   local report_file
   local flagged_count=0
   local flagged_items=()
+  local flagged_ids=()
   local move_failures=()
   report_file="$(tmpfile)"
   local moved_count=0
@@ -397,6 +398,7 @@ run_caches_module() {
     log "CACHE? ${mb}MB | modified: ${mod} | owner: ${owner} | path: ${path}"
     flagged_count=$((flagged_count + 1))
     flagged_items+=("${mb}MB | modified: ${mod} | owner: ${owner} | path: ${path}")
+    flagged_ids+=("${path}")
 
     # Explain-only: show top subfolders by size (up to 3)
     if [[ "${EXPLAIN:-false}" == "true" ]]; then
@@ -461,6 +463,18 @@ run_caches_module() {
   # ----------------------------
   # Module summary (global footer aggregation)
   # ----------------------------
+
+  # Exported summary fields for mc-leaner.
+  CACHES_FLAGGED_COUNT="${flagged_count}"
+  CACHES_TOTAL_MB="${overall_total_mb}"
+  CACHES_MOVED_COUNT="${moved_count}"
+  CACHES_FAILURES_COUNT="${#move_failures[@]}"
+  CACHES_SCANNED_DIRS="${scanned_dirs}"
+  CACHES_THRESHOLD_MB="${min_mb}"
+
+  # Export flagged identifiers list (paths) for run summary consumption.
+  CACHES_FLAGGED_IDS_LIST="$(printf '%s\n' "${flagged_ids[@]}")"
+
   summary_add "Caches flagged=${flagged_count} total_mb=${overall_total_mb} moved=${moved_count} failures=${#move_failures[@]} scanned=${scanned_dirs} (threshold=${min_mb}MB)"
 }
 

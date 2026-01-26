@@ -45,6 +45,9 @@ run_launchd_module() {
   local inventory_index_file="${4:-}"
   local flagged_count=0
   local flagged_items=()
+
+  # Collect identifiers for flagged launchd items (human-readable descriptors).
+  # Exported at end as LAUNCHD_FLAGGED_IDS_LIST (newline-delimited).
   local move_fail_count=0
   local move_failures=()
 
@@ -319,6 +322,10 @@ run_launchd_module() {
   fi
 
   explain_log "Launchd: checked ${checked} plists."
+
+  # Export flagged identifiers list for run summary consumption.
+  LAUNCHD_FLAGGED_IDS_LIST="$(printf '%s\n' "${flagged_items[@]}")"
+  LAUNCHD_FLAGGED_COUNT="${flagged_count}"
 
   _launchd_summary_emit "${checked}"
 }

@@ -32,31 +32,8 @@ source "$ROOT_DIR/modules/leftovers.sh"
 source "$ROOT_DIR/modules/permissions.sh"
 
 source "$ROOT_DIR/modules/startup.sh"
+source "$ROOT_DIR/modules/disk.sh"
 
-# ----------------------------
-# Startup module function shim
-# ----------------------------
-# The startup module is newer and may export different entrypoint names.
-# Standard contract is `run_startup_module`, but support older names too.
-if ! declare -F run_startup_module >/dev/null 2>&1; then
-  run_startup_module() {
-    if declare -F run_startup >/dev/null 2>&1; then
-      run_startup "$@"
-      return $?
-    fi
-    if declare -F startup_module >/dev/null 2>&1; then
-      startup_module "$@"
-      return $?
-    fi
-    if declare -F startup_inspect >/dev/null 2>&1; then
-      startup_inspect "$@"
-      return $?
-    fi
-
-    log "Startup module not available: expected function run_startup_module (or fallback name) not found."
-    return 127
-  }
-fi
 
 
 # ----------------------------
@@ -234,9 +211,62 @@ log "Backup note: used only when --apply causes moves (reversible)."
 # - Each module already prints its own flagged items inline.
 # - We also collect a concise end-of-run summary so global runs are easier to review.
 summary_add "mode=$MODE apply=$APPLY backup=$BACKUP_DIR"
-if [[ "$EXPLAIN" == "true" ]]; then
-  summary_add "explain=true"
-fi
+
+# ----------------------------
+# Summary helpers
+# ----------------------------
+_now_epoch_s() {
+  date +%s
+}
+
+_elapsed_s() {
+  local start_s="$1"
+  local end_s
+  end_s="$(_now_epoch_s)"
+  if [[ -z "$start_s" ]]; then
+    echo 0
+    return 0
+  fi
+  echo $(( end_s - start_s ))
+}
+
+_summary_add_list() {
+  # Usage: _summary_add_list <label> <newline_delimited_items> [max_items]
+  # Prints a header line and then one item per summary line (clean, grep-friendly).
+  local label="$1"
+  local items_nl="${2:-}"
+  local max_items="${3:-0}"
+
+  [[ -n "$items_nl" ]] || return 0
+
+  # Read items into an array (preserve spaces inside items).
+  local -a _items
+  while IFS= read -r _line; do
+    [[ -n "${_line}" ]] && _items+=("${_line}")
+  done <<< "$items_nl"
+
+  local total="${#_items[@]}"
+  [[ "$total" -gt 0 ]] || return 0
+
+  summary_add "${label}: flagged_items (${total})"
+
+  local i
+  local limit="$total"
+  if [[ "$max_items" =~ ^[0-9]+$ && "$max_items" -gt 0 && "$max_items" -lt "$total" ]]; then
+    limit="$max_items"
+  fi
+
+  for ((i=0; i<limit; i++)); do
+    summary_add "${label}:  - ${_items[$i]}"
+  done
+
+  if [[ "$limit" -lt "$total" ]]; then
+    summary_add "${label}:  - ... plus $((total - limit)) more"
+  fi
+}
+
+run_started_s="$(_now_epoch_s)"
+
 
 # ----------------------------
 # Dispatch by mode
@@ -252,9 +282,11 @@ case "$MODE" in
     # Prefer inventory index lookups; keep known_apps_file as a legacy fallback input.
     ensure_known_apps
     run_launchd_module "scan" "false" "$BACKUP_DIR" "$inventory_index_file" "$known_apps_file"
+    # Startup module exports (best-effort): STARTUP_CHECKED_COUNT, STARTUP_FLAGGED_COUNT,
+    # STARTUP_UNKNOWN_OWNER_COUNT, STARTUP_BOOT_FLAGGED_COUNT, STARTUP_LOGIN_FLAGGED_COUNT,
+    # STARTUP_SURFACE_BREAKDOWN, STARTUP_THRESHOLD_MODE
     summary_add "launchd: inspected"
 
-    # Prefer brew executable basenames and inventory index for /usr/local/bin ownership.
     run_bins_module "scan" "false" "$BACKUP_DIR" "$inventory_index_file" "$brew_bins_file"
     summary_add "bins: inspected"
 
@@ -266,8 +298,20 @@ case "$MODE" in
     run_permissions_module "false" "$BACKUP_DIR" "$EXPLAIN"
     summary_add "permissions: inspected"
     # Startup inspection (inspection-only; never modifies system state)
+    # Startup module exports (best-effort): STARTUP_CHECKED_COUNT, STARTUP_FLAGGED_COUNT,
+    # STARTUP_UNKNOWN_OWNER_COUNT, STARTUP_BOOT_FLAGGED_COUNT, STARTUP_LOGIN_FLAGGED_COUNT,
+    # STARTUP_SURFACE_BREAKDOWN, STARTUP_THRESHOLD_MODE
     run_startup_module "scan" "false" "$BACKUP_DIR" "$EXPLAIN" "$inventory_index_file"
-    summary_add "startup: inspected"
+    summary_add "startup: inspected (checked=${STARTUP_CHECKED_COUNT:-0} flagged=${STARTUP_FLAGGED_COUNT:-0} boot_flagged=${STARTUP_BOOT_FLAGGED_COUNT:-0} login_flagged=${STARTUP_LOGIN_FLAGGED_COUNT:-0} unknown_owner=${STARTUP_UNKNOWN_OWNER_COUNT:-0} surface=${STARTUP_SURFACE_BREAKDOWN:-n/a})"
+    if [[ "${STARTUP_FLAGGED_COUNT:-0}" -gt 0 && -n "${STARTUP_FLAGGED_IDS_LIST:-}" ]]; then
+      _summary_add_list "startup" "${STARTUP_FLAGGED_IDS_LIST}"
+    fi
+    if [[ "${STARTUP_BOOT_FLAGGED_COUNT:-0}" -gt 0 ]]; then
+      summary_add "startup: risk_hint=boot-time items flagged; review launchd labels/login items before disabling"
+    fi
+    # Disk usage attribution (inspection-only; never modifies system state)
+    run_disk_module "scan" "false" "$BACKUP_DIR" "$EXPLAIN" "$inventory_index_file"
+    summary_add "disk: inspected (flagged=${DISK_FLAGGED_COUNT:-0} total_mb=${DISK_TOTAL_MB:-0} printed=${DISK_PRINTED_COUNT:-0} threshold_mb=${DISK_THRESHOLD_MB:-0})"
     ensure_installed_bundle_ids
     run_leftovers_module "false" "$BACKUP_DIR" "$EXPLAIN" "$installed_bundle_ids_file"
     summary_add "leftovers: inspected (threshold=50MB)"
@@ -296,8 +340,20 @@ case "$MODE" in
     run_permissions_module "true" "$BACKUP_DIR" "$EXPLAIN"
     summary_add "permissions: cleaned"
     # Startup inspection (inspection-only; never modifies system state)
+    # Startup module exports (best-effort): STARTUP_CHECKED_COUNT, STARTUP_FLAGGED_COUNT,
+    # STARTUP_UNKNOWN_OWNER_COUNT, STARTUP_BOOT_FLAGGED_COUNT, STARTUP_LOGIN_FLAGGED_COUNT,
+    # STARTUP_SURFACE_BREAKDOWN, STARTUP_THRESHOLD_MODE
     run_startup_module "scan" "false" "$BACKUP_DIR" "$EXPLAIN" "$inventory_index_file"
-    summary_add "startup: inspected"
+    summary_add "startup: inspected (checked=${STARTUP_CHECKED_COUNT:-0} flagged=${STARTUP_FLAGGED_COUNT:-0} boot_flagged=${STARTUP_BOOT_FLAGGED_COUNT:-0} login_flagged=${STARTUP_LOGIN_FLAGGED_COUNT:-0} unknown_owner=${STARTUP_UNKNOWN_OWNER_COUNT:-0} surface=${STARTUP_SURFACE_BREAKDOWN:-n/a})"
+    if [[ "${STARTUP_FLAGGED_COUNT:-0}" -gt 0 && -n "${STARTUP_FLAGGED_IDS_LIST:-}" ]]; then
+      _summary_add_list "startup" "${STARTUP_FLAGGED_IDS_LIST}"
+    fi
+    if [[ "${STARTUP_BOOT_FLAGGED_COUNT:-0}" -gt 0 ]]; then
+      summary_add "startup: risk_hint=boot-time items flagged; review launchd labels/login items before disabling"
+    fi
+    # Disk usage attribution (inspection-only; never modifies system state)
+    run_disk_module "scan" "false" "$BACKUP_DIR" "$EXPLAIN" "$inventory_index_file"
+    summary_add "disk: inspected (flagged=${DISK_FLAGGED_COUNT:-0} total_mb=${DISK_TOTAL_MB:-0} printed=${DISK_PRINTED_COUNT:-0} threshold_mb=${DISK_THRESHOLD_MB:-0})"
     ensure_installed_bundle_ids
     run_leftovers_module "true" "$BACKUP_DIR" "$EXPLAIN" "$installed_bundle_ids_file"
     summary_add "leftovers: cleaned (threshold=50MB)"
@@ -375,8 +431,22 @@ case "$MODE" in
     ;;
   startup-only)
     ensure_inventory
+    # Startup module exports (best-effort): STARTUP_CHECKED_COUNT, STARTUP_FLAGGED_COUNT,
+    # STARTUP_UNKNOWN_OWNER_COUNT, STARTUP_BOOT_FLAGGED_COUNT, STARTUP_LOGIN_FLAGGED_COUNT,
+    # STARTUP_SURFACE_BREAKDOWN, STARTUP_THRESHOLD_MODE
     run_startup_module "scan" "false" "$BACKUP_DIR" "$EXPLAIN" "$inventory_index_file"
-    summary_add "startup: inspected"
+    summary_add "startup: inspected (checked=${STARTUP_CHECKED_COUNT:-0} flagged=${STARTUP_FLAGGED_COUNT:-0} boot_flagged=${STARTUP_BOOT_FLAGGED_COUNT:-0} login_flagged=${STARTUP_LOGIN_FLAGGED_COUNT:-0} unknown_owner=${STARTUP_UNKNOWN_OWNER_COUNT:-0} surface=${STARTUP_SURFACE_BREAKDOWN:-n/a})"
+    if [[ "${STARTUP_FLAGGED_COUNT:-0}" -gt 0 && -n "${STARTUP_FLAGGED_IDS_LIST:-}" ]]; then
+      _summary_add_list "startup" "${STARTUP_FLAGGED_IDS_LIST}"
+    fi
+    if [[ "${STARTUP_BOOT_FLAGGED_COUNT:-0}" -gt 0 ]]; then
+      summary_add "startup: risk_hint=boot-time items flagged; review launchd labels/login items before disabling"
+    fi
+    ;;
+  disk-only)
+    ensure_inventory
+    run_disk_module "scan" "false" "$BACKUP_DIR" "$EXPLAIN" "$inventory_index_file"
+    summary_add "disk: inspected (flagged=${DISK_FLAGGED_COUNT:-0} total_mb=${DISK_TOTAL_MB:-0} printed=${DISK_PRINTED_COUNT:-0} threshold_mb=${DISK_THRESHOLD_MB:-0})"
     ;;
   *)
     echo "Unknown mode: $MODE"
@@ -385,5 +455,6 @@ case "$MODE" in
     ;;
 esac
 
+summary_add "timing: total_dur_s=$(_elapsed_s "$run_started_s")"
 summary_print
 log "Done."  # End of run

@@ -24,7 +24,7 @@ usage() {
 mc-leaner
 
 Usage:
-  bash mc-leaner.sh [--mode <scan|clean|report|inventory-only|launchd-only|bins-only|caches-only|logs-only|brew-only|leftovers-only|permissions-only>] [--apply] [--backup-dir <path>] [--explain]
+  bash mc-leaner.sh [--mode <scan|clean|report|inventory-only|launchd-only|startup-only|bins-only|caches-only|logs-only|brew-only|leftovers-only|permissions-only|disk-only>] [--apply] [--backup-dir <path>] [--explain]
 
 Defaults:
   --mode scan     (dry-run, no moves)
@@ -38,11 +38,13 @@ Examples:
   bash mc-leaner.sh --mode clean --apply
   bash mc-leaner.sh --mode report
   bash mc-leaner.sh --mode inventory-only
+  bash mc-leaner.sh --mode startup-only
   bash mc-leaner.sh --mode caches-only
   bash mc-leaner.sh --mode logs-only
   bash mc-leaner.sh --mode brew-only
   bash mc-leaner.sh --mode leftovers-only
   bash mc-leaner.sh --mode permissions-only
+  bash mc-leaner.sh --mode disk-only
 EOF
 }
 
@@ -69,7 +71,7 @@ parse_args() {
 
 validate_mode() {
   case "$MODE" in
-    scan|clean|report|inventory-only|launchd-only|bins-only|caches-only|logs-only|brew-only|leftovers-only|permissions-only)
+    scan|clean|report|inventory-only|launchd-only|startup-only|bins-only|caches-only|logs-only|brew-only|leftovers-only|permissions-only|disk-only)
       return 0
       ;;
     *)

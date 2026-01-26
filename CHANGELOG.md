@@ -1,6 +1,5 @@
 # Changelog
 
-
 All notable changes to this project are documented in this file.
 
 This project follows a pragmatic versioning scheme:
@@ -8,6 +7,7 @@ This project follows a pragmatic versioning scheme:
 - MAJOR.MINOR.PATCH
 - v1.0.x is maintenance and bugfix-only
 - New features land in minor releases (v1.1, v1.2, …)
+
 ---
 
 ## v2.0.0 — Contracted core, startup inspection & system lenses

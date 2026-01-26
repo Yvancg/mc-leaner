@@ -40,9 +40,13 @@ set -euo pipefail
 # Global counter: number of LEFTOVER? findings emitted in this run.
 LEFTOVERS_FLAGGED_COUNT=0
 
+
 # Summary list of flagged items for end-of-run legibility.
 # Format: one string per item (pre-formatted for display).
 LEFTOVERS_FLAGGED_ITEMS=()
+
+# Newline-delimited list of flagged identifiers (paths) for run-summary consumption.
+LEFTOVERS_FLAGGED_IDS_LIST=""
 
 
 # Summary list of move failures for end-of-run legibility (apply-mode only).
@@ -249,6 +253,7 @@ run_leftovers_module() {
 
   LEFTOVERS_FLAGGED_COUNT=0
   LEFTOVERS_FLAGGED_ITEMS=()
+  LEFTOVERS_FLAGGED_IDS_LIST=""
   LEFTOVERS_MOVE_FAILURES=()
 
   if [[ -z "$inventory_file" || ! -f "$inventory_file" ]]; then
@@ -369,6 +374,9 @@ run_leftovers_module() {
   log "Leftovers: run with --apply to relocate selected leftovers (user-confirmed, reversible)."
   rm -f "${installed_index_keys_file:-}" 2>/dev/null || true
   rm -f "${inventory_index_tmp:-}" 2>/dev/null || true
+
+  # Normalize export (strip trailing newline if present).
+  LEFTOVERS_FLAGGED_IDS_LIST="$(printf '%s' "${LEFTOVERS_FLAGGED_IDS_LIST}" | sed '$s/\n$//')"
   _leftovers_summary_emit
 }
 
@@ -508,6 +516,9 @@ _leftovers_scan_target() {
     # Track for end-of-run summary.
     LEFTOVERS_FLAGGED_ITEMS+=("${mb}MB | modified: ${mtime} | owner: ${base} | ${p}")
     LEFTOVERS_FLAGGED_COUNT=$(( ${LEFTOVERS_FLAGGED_COUNT:-0} + 1 ))
+
+    # Append to newline-delimited identifiers list (paths).
+    LEFTOVERS_FLAGGED_IDS_LIST+="${p}"$'\n'
 
     if [[ "$explain" == "true" ]]; then
       if [[ "$is_allowlisted" == "true" ]]; then

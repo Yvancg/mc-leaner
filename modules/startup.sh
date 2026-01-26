@@ -4,7 +4,11 @@
 # Purpose: Inspect macOS startup execution surfaces (launchd + login items) for visibility.
 # Safety: Inspection-only (never modifies system state). In clean/apply mode, it still only scans.
 
+
 set -o pipefail
+
+# Contract: run_startup_module <mode> <apply> <backup_dir> <explain> [inventory_index]
+# Note: Kept near the top so simple greps and partial prints (e.g., `sed -n '1,260p'`) will find it.
 
 # ----------------------------------------------------------------------------
 # Logging fallbacks (when module is run standalone)
@@ -40,11 +44,25 @@ _startup_explain() {
 
 _startup_is_apple_owner() {
   # Apple-owned identifiers (best-effort).
+  # Keep this strict to avoid mis-attributing third-party items that merely contain "apple".
   local label="$1"
   [[ "${label}" == com.apple.* ]] && return 0
   [[ "${label}" == group.com.apple.* ]] && return 0
-  [[ "${label}" == *.apple.* ]] && return 0
   return 1
+}
+
+_startup_plist_extract_raw() {
+  # Usage: _startup_plist_extract_raw <plist> <keypath>
+  # Returns the value as a raw scalar when possible, otherwise empty.
+  local plist="$1" keypath="$2"
+  /usr/bin/plutil -extract "${keypath}" raw -o - "${plist}" 2>/dev/null || true
+}
+
+_startup_plist_extract_xml() {
+  # Usage: _startup_plist_extract_xml <plist> <keypath>
+  # Returns an XML representation (useful for dict/array/bool presence checks), otherwise empty.
+  local plist="$1" keypath="$2"
+  /usr/bin/plutil -extract "${keypath}" xml1 -o - "${plist}" 2>/dev/null || true
 }
 
 _startup_infer_timing_from_plist() {
@@ -57,12 +75,12 @@ _startup_infer_timing_from_plist() {
   fi
 
   # Agents are usually login unless clearly on-demand.
-  # Infer on-demand when BOTH RunAtLoad and KeepAlive are absent.
-  local runatload="" keepalive=""
-  runatload="$(/usr/bin/defaults read "${plist}" RunAtLoad 2>/dev/null || true)"
-  keepalive="$(/usr/bin/defaults read "${plist}" KeepAlive 2>/dev/null || true)"
+  # Infer on-demand when BOTH RunAtLoad and KeepAlive keys are absent.
+  local runatload="" keepalive_xml=""
+  runatload="$(_startup_plist_extract_raw "${plist}" RunAtLoad | tr -d '[:space:]')"
+  keepalive_xml="$(_startup_plist_extract_xml "${plist}" KeepAlive)"
 
-  if [[ -z "${runatload}" && -z "${keepalive}" ]]; then
+  if [[ -z "${runatload}" && -z "${keepalive_xml}" ]]; then
     echo "on-demand"
   else
     echo "login"
@@ -74,7 +92,7 @@ _startup_plist_label() {
   local plist="$1"
   local label=""
 
-  label="$(/usr/bin/defaults read "${plist}" Label 2>/dev/null || true)"
+  label="$(_startup_plist_extract_raw "${plist}" Label | sed 's/^\s*//;s/\s*$//')"
   if [[ -n "${label}" ]]; then
     echo "${label}"
   else
@@ -87,14 +105,14 @@ _startup_plist_exec() {
   local plist="$1"
   local program="" argv0=""
 
-  program="$(/usr/bin/defaults read "${plist}" Program 2>/dev/null || true)"
+  program="$(_startup_plist_extract_raw "${plist}" Program | sed 's/^\s*//;s/\s*$//')"
   if [[ -n "${program}" ]]; then
     echo "${program}"
     return 0
   fi
 
-  # defaults read returns newline-delimited items for arrays; grab first non-empty token.
-  argv0="$(/usr/bin/defaults read "${plist}" ProgramArguments 2>/dev/null | head -n 1 | sed 's/^\s*//;s/\s*$//' || true)"
+  # Use ProgramArguments[0] when present.
+  argv0="$(_startup_plist_extract_raw "${plist}" ProgramArguments.0 | sed 's/^\s*//;s/\s*$//')"
   if [[ -n "${argv0}" ]]; then
     echo "${argv0}"
     return 0
@@ -202,6 +220,15 @@ _startup_scan_launchd_dir() {
       else
         STARTUP_FLAGGED=$((STARTUP_FLAGGED + 1))
         STARTUP_UNKNOWN=$((STARTUP_UNKNOWN + 1))
+        STARTUP_FLAGGED_IDS+=("${label:-$plist}")
+
+        # Surface breakdown for run summary
+        # Treat "on-demand" as login surface for summary purposes.
+        if [[ "${timing}" == "boot" ]]; then
+          STARTUP_BOOT_FLAGGED=$((STARTUP_BOOT_FLAGGED + 1))
+        else
+          STARTUP_LOGIN_FLAGGED=$((STARTUP_LOGIN_FLAGGED + 1))
+        fi
       fi
     fi
 
@@ -238,6 +265,8 @@ APPLESCRIPT
   local line="" label="" exec_path="" timing="login" owner_meta="" owner="" how="" conf=""
 
   while IFS= read -r line; do
+    [[ -n "${line}" ]] || continue
+
     label="${line}"
     exec_path="" # Not reliably obtainable without additional calls.
 
@@ -252,17 +281,18 @@ APPLESCRIPT
     if [[ "${owner}" == "Unknown" ]]; then
       STARTUP_FLAGGED=$((STARTUP_FLAGGED + 1))
       STARTUP_UNKNOWN=$((STARTUP_UNKNOWN + 1))
+      STARTUP_FLAGGED_IDS+=("${label}")
+      STARTUP_LOGIN_FLAGGED=$((STARTUP_LOGIN_FLAGGED + 1))
     fi
-
   done <<<"${items}"
 }
+
 
 # -----------------------------------------------------------------------------
 # Entrypoint
 # -----------------------------------------------------------------------------
 
 run_startup_module() {
-  # Contract: run_startup_module <mode> <apply> <backup_dir> <explain> [inventory_index]
   local mode="${1:-scan}"
   local apply="${2:-false}"
   local backup_dir="${3:-}"
@@ -271,13 +301,26 @@ run_startup_module() {
 
   : "${backup_dir}" "${inventory_index}" # reserved for contract consistency
 
-  STARTUP_CHECKED=${STARTUP_CHECKED:-0}
-  STARTUP_FLAGGED=${STARTUP_FLAGGED:-0}
-  STARTUP_UNKNOWN=${STARTUP_UNKNOWN:-0}
-
+  # Summary counters (exported via globals for mc-leaner.sh run summary)
   STARTUP_CHECKED=0
   STARTUP_FLAGGED=0
   STARTUP_UNKNOWN=0
+  STARTUP_BOOT_FLAGGED=0
+  STARTUP_LOGIN_FLAGGED=0
+  STARTUP_SURFACE="launchd+loginitems"
+
+  # Compatibility aliases for mc-leaner.sh summary naming.
+  STARTUP_CHECKED_COUNT=0
+  STARTUP_FLAGGED_COUNT=0
+  STARTUP_UNKNOWN_OWNER_COUNT=0
+  STARTUP_BOOT_FLAGGED_COUNT=0
+  STARTUP_LOGIN_FLAGGED_COUNT=0
+  STARTUP_SURFACE_BREAKDOWN="${STARTUP_SURFACE}"
+  STARTUP_THRESHOLD_MODE="n/a"
+
+  # Collect identifiers for flagged startup items (prefer label; fall back to plist path).
+  STARTUP_FLAGGED_IDS=()
+  STARTUP_FLAGGED_IDS_LIST=""
 
   if [[ "${mode}" == "clean" || "${apply}" == "true" ]]; then
     _startup_explain "${explain}" "Startup: clean/apply requested, but startup is inspection-only; running scan"
@@ -293,5 +336,21 @@ run_startup_module() {
 
   _startup_scan_login_items "${explain}"
 
+  # Export flagged identifiers for run summary consumption.
+  STARTUP_FLAGGED_IDS_LIST="$(printf '%s\n' "${STARTUP_FLAGGED_IDS[@]}")"
+
+  # Sync compatibility aliases for mc-leaner.sh summary.
+  STARTUP_CHECKED_COUNT="${STARTUP_CHECKED}"
+  STARTUP_FLAGGED_COUNT="${STARTUP_FLAGGED}"
+  STARTUP_UNKNOWN_OWNER_COUNT="${STARTUP_UNKNOWN}"
+  STARTUP_BOOT_FLAGGED_COUNT="${STARTUP_BOOT_FLAGGED}"
+  STARTUP_LOGIN_FLAGGED_COUNT="${STARTUP_LOGIN_FLAGGED}"
+  STARTUP_SURFACE_BREAKDOWN="${STARTUP_SURFACE}"
+
   log_info "Startup: inspected ${STARTUP_CHECKED} item(s); flagged ${STARTUP_FLAGGED} (unknown owner ${STARTUP_UNKNOWN})"
+}
+
+# Compatibility: some runners may call `run_startup` (without the `_module` suffix).
+run_startup() {
+  run_startup_module "$@"
 }

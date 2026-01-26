@@ -34,8 +34,6 @@ source "$ROOT_DIR/modules/permissions.sh"
 source "$ROOT_DIR/modules/startup.sh"
 source "$ROOT_DIR/modules/disk.sh"
 
-
-
 # ----------------------------
 # Inventory-backed context builders
 # ----------------------------

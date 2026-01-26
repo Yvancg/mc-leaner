@@ -10,7 +10,7 @@ mc-leaner is **safe by default**:
 - It never deletes files
 - All changes are reversible via a backup folder
 - Security and endpoint protection software is always skipped
-- All modules in v2.0.0 follow an inspection-first contract with explicit user confirmation for any changes
+- All modules in v2.1.0 follow an inspection-first contract with explicit user confirmation for any changes
 
 That said, mc-leaner is a **power tool**. You are expected to read prompts and understand what you approve.
 
@@ -67,6 +67,23 @@ mc-leaner flags items for **review**, not removal. If you still use an app, keep
 
 ---
 
+## Why does the run summary list every flagged item?
+
+As of v2.1.0, mc-leaner always lists the identifiers of all flagged items in the end-of-run summary.
+
+This is intentional.
+
+Counts alone are ambiguous. Explicit lists allow you to:
+
+- see exactly *what* was flagged
+- correlate findings across modules
+- review results later without scrolling through raw logs
+- use mc-leaner output in scripts or audits
+
+Nothing is hidden behind summary numbers anymore.
+
+---
+
 ## What does the Caches module actually do?
 
 The Caches module is **inspection-first**.
@@ -92,7 +109,7 @@ This allows you to safely reclaim space without guessing.
 
 ## What is the Inventory module?
 
-The Inventory module (introduced in v1.6.0, contract-locked in v2.0.0) is a **foundational inspection module**.
+The Inventory module (introduced in v1.6.0, contract-locked in v2.1.0) is a **foundational inspection module**.
 
 It builds a live inventory of installed software, including:
 
@@ -101,7 +118,7 @@ It builds a live inventory of installed software, including:
 - application paths
 - Homebrew formulae and casks
 
-In v2.0.0, the Inventory is the single source of truth for ownership and matching across all inspection modules.
+In v2.1.0, the Inventory is the single source of truth for ownership and matching across all inspection modules.
 
 This inventory is used internally by other modules to improve accuracy and reduce false positives.
 
@@ -135,6 +152,26 @@ By default, it reports:
 With `--apply`, logs can be moved to a backup folder **only after explicit confirmation**.
 
 No logs are ever deleted automatically.
+
+---
+
+## What does the Disk module do?
+
+The Disk module (introduced in v2.1.0) is **inspection-first**.
+
+It scans for large disk consumers across common user and system locations and flags paths that exceed conservative size thresholds.
+
+For each flagged path, it reports:
+
+- total size
+- path
+- inferred owner (via the Inventory when possible)
+- confidence level
+- category (for example Toolchains, Apps, Data)
+
+Nothing is removed by default.
+
+With `--apply`, the Disk module still does **not** delete files. It only reports and summarizes disk usage so you can decide what to investigate further.
 
 ---
 
@@ -195,7 +232,7 @@ All decisions are explicit and reversible.
 
 ## What does the Startup module do?
 
-The Startup module is introduced in v2.0.0.
+The Startup module is introduced in v2.1.0.
 
 It inspects startup-related execution paths including LaunchAgents, LaunchDaemons, and Login Items.
 
@@ -213,6 +250,8 @@ It reports:
 Items with unknown or ambiguous ownership are flagged for review.
 
 Apple system and protected services are reported but never modified.
+
+As of v2.1.0, all flagged startup items are also listed explicitly in the run summary so you can review them without searching through inline output.
 
 ---
 
@@ -324,7 +363,7 @@ See CONTRIBUTING.md for details.
 
 mc-leaner only runs modules explicitly selected by the chosen mode.
 
-The default scan mode runs all inspection modules, including new ones introduced in v2.0.0 such as Startup, but performs no destructive actions.
+The default scan mode runs all inspection modules, including new ones introduced in v2.1.0 such as Startup, but performs no destructive actions.
 
 Any file movement or cleanup requires explicit use of `--apply`.
 

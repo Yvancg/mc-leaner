@@ -282,10 +282,10 @@ case "$MODE" in
     # Prefer inventory index lookups; keep known_apps_file as a legacy fallback input.
     ensure_known_apps
     run_launchd_module "scan" "false" "$BACKUP_DIR" "$inventory_index_file" "$known_apps_file"
-    # Startup module exports (best-effort): STARTUP_CHECKED_COUNT, STARTUP_FLAGGED_COUNT,
-    # STARTUP_UNKNOWN_OWNER_COUNT, STARTUP_BOOT_FLAGGED_COUNT, STARTUP_LOGIN_FLAGGED_COUNT,
-    # STARTUP_SURFACE_BREAKDOWN, STARTUP_THRESHOLD_MODE
     summary_add "launchd: inspected"
+    if [[ "${LAUNCHD_FLAGGED_COUNT:-0}" -gt 0 && -n "${LAUNCHD_FLAGGED_IDS_LIST:-}" ]]; then
+      _summary_add_list "launchd" "${LAUNCHD_FLAGGED_IDS_LIST}" 50
+    fi
 
     run_bins_module "scan" "false" "$BACKUP_DIR" "$inventory_index_file" "$brew_bins_file"
     summary_add "bins: inspected"
@@ -293,8 +293,14 @@ case "$MODE" in
     # Use inventory index to label cache owners more accurately.
     run_caches_module "scan" "false" "$BACKUP_DIR" "$inventory_index_file"
     summary_add "caches: inspected"
+    if [[ "${CACHES_FLAGGED_COUNT:-0}" -gt 0 && -n "${CACHES_FLAGGED_IDS_LIST:-}" ]]; then
+      _summary_add_list "caches" "${CACHES_FLAGGED_IDS_LIST}" 50
+    fi
     run_logs_module "false" "$BACKUP_DIR" "$EXPLAIN" "50"
     summary_add "logs: inspected (threshold=50MB)"
+    if [[ "${LOGS_FLAGGED_COUNT:-0}" -gt 0 && -n "${LOGS_FLAGGED_IDS_LIST:-}" ]]; then
+      _summary_add_list "logs" "${LOGS_FLAGGED_IDS_LIST}" 50
+    fi
     run_permissions_module "false" "$BACKUP_DIR" "$EXPLAIN"
     summary_add "permissions: inspected"
     # Startup inspection (inspection-only; never modifies system state)
@@ -312,9 +318,15 @@ case "$MODE" in
     # Disk usage attribution (inspection-only; never modifies system state)
     run_disk_module "scan" "false" "$BACKUP_DIR" "$EXPLAIN" "$inventory_index_file"
     summary_add "disk: inspected (flagged=${DISK_FLAGGED_COUNT:-0} total_mb=${DISK_TOTAL_MB:-0} printed=${DISK_PRINTED_COUNT:-0} threshold_mb=${DISK_THRESHOLD_MB:-0})"
+    if [[ "${DISK_FLAGGED_COUNT:-0}" -gt 0 && -n "${DISK_FLAGGED_IDS_LIST:-}" ]]; then
+      _summary_add_list "disk" "${DISK_FLAGGED_IDS_LIST}" 50
+    fi
     ensure_installed_bundle_ids
     run_leftovers_module "false" "$BACKUP_DIR" "$EXPLAIN" "$installed_bundle_ids_file"
     summary_add "leftovers: inspected (threshold=50MB)"
+    if [[ "${LEFTOVERS_FLAGGED_COUNT:-0}" -gt 0 && -n "${LEFTOVERS_FLAGGED_IDS_LIST:-}" ]]; then
+      _summary_add_list "leftovers" "${LEFTOVERS_FLAGGED_IDS_LIST}" 50
+    fi
     run_intel_report
     summary_add "intel: report written"
     ;;
@@ -329,14 +341,23 @@ case "$MODE" in
     ensure_known_apps
     run_launchd_module "clean" "true" "$BACKUP_DIR" "$inventory_index_file" "$known_apps_file"
     summary_add "launchd: cleaned"
+    if [[ "${LAUNCHD_FLAGGED_COUNT:-0}" -gt 0 && -n "${LAUNCHD_FLAGGED_IDS_LIST:-}" ]]; then
+      _summary_add_list "launchd" "${LAUNCHD_FLAGGED_IDS_LIST}" 50
+    fi
 
     run_bins_module "clean" "true" "$BACKUP_DIR" "$inventory_index_file" "$brew_bins_file"
     summary_add "bins: cleaned"
 
     run_caches_module "clean" "true" "$BACKUP_DIR" "$inventory_index_file"
     summary_add "caches: cleaned"
+    if [[ "${CACHES_FLAGGED_COUNT:-0}" -gt 0 && -n "${CACHES_FLAGGED_IDS_LIST:-}" ]]; then
+      _summary_add_list "caches" "${CACHES_FLAGGED_IDS_LIST}" 50
+    fi
     run_logs_module "true" "$BACKUP_DIR" "$EXPLAIN" "50"
     summary_add "logs: cleaned (threshold=50MB)"
+    if [[ "${LOGS_FLAGGED_COUNT:-0}" -gt 0 && -n "${LOGS_FLAGGED_IDS_LIST:-}" ]]; then
+      _summary_add_list "logs" "${LOGS_FLAGGED_IDS_LIST}" 50
+    fi
     run_permissions_module "true" "$BACKUP_DIR" "$EXPLAIN"
     summary_add "permissions: cleaned"
     # Startup inspection (inspection-only; never modifies system state)
@@ -354,9 +375,15 @@ case "$MODE" in
     # Disk usage attribution (inspection-only; never modifies system state)
     run_disk_module "scan" "false" "$BACKUP_DIR" "$EXPLAIN" "$inventory_index_file"
     summary_add "disk: inspected (flagged=${DISK_FLAGGED_COUNT:-0} total_mb=${DISK_TOTAL_MB:-0} printed=${DISK_PRINTED_COUNT:-0} threshold_mb=${DISK_THRESHOLD_MB:-0})"
+    if [[ "${DISK_FLAGGED_COUNT:-0}" -gt 0 && -n "${DISK_FLAGGED_IDS_LIST:-}" ]]; then
+      _summary_add_list "disk" "${DISK_FLAGGED_IDS_LIST}" 50
+    fi
     ensure_installed_bundle_ids
     run_leftovers_module "true" "$BACKUP_DIR" "$EXPLAIN" "$installed_bundle_ids_file"
     summary_add "leftovers: cleaned (threshold=50MB)"
+    if [[ "${LEFTOVERS_FLAGGED_COUNT:-0}" -gt 0 && -n "${LEFTOVERS_FLAGGED_IDS_LIST:-}" ]]; then
+      _summary_add_list "leftovers" "${LEFTOVERS_FLAGGED_IDS_LIST}" 50
+    fi
     run_intel_report
     summary_add "intel: report written"
     ;;
@@ -368,6 +395,9 @@ case "$MODE" in
     else
       run_leftovers_module "true" "$BACKUP_DIR" "$EXPLAIN" "$installed_bundle_ids_file"
       summary_add "leftovers: cleaned (threshold=50MB)"
+    fi
+    if [[ "${LEFTOVERS_FLAGGED_COUNT:-0}" -gt 0 && -n "${LEFTOVERS_FLAGGED_IDS_LIST:-}" ]]; then
+      _summary_add_list "leftovers" "${LEFTOVERS_FLAGGED_IDS_LIST}" 50
     fi
     ;;
   report)
@@ -383,6 +413,9 @@ case "$MODE" in
     else
       run_launchd_module "clean" "true" "$BACKUP_DIR" "$inventory_index_file" "$known_apps_file"
       summary_add "launchd: cleaned"
+    fi
+    if [[ "${LAUNCHD_FLAGGED_COUNT:-0}" -gt 0 && -n "${LAUNCHD_FLAGGED_IDS_LIST:-}" ]]; then
+      _summary_add_list "launchd" "${LAUNCHD_FLAGGED_IDS_LIST}" 50
     fi
     ;;
   bins-only)
@@ -406,6 +439,9 @@ case "$MODE" in
       run_caches_module "clean" "true" "$BACKUP_DIR" "$inventory_index_file"
       summary_add "caches: cleaned"
     fi
+    if [[ "${CACHES_FLAGGED_COUNT:-0}" -gt 0 && -n "${CACHES_FLAGGED_IDS_LIST:-}" ]]; then
+      _summary_add_list "caches" "${CACHES_FLAGGED_IDS_LIST}" 50
+    fi
     ;;
   logs-only)
     if [[ "$APPLY" != "true" ]]; then
@@ -414,6 +450,9 @@ case "$MODE" in
     else
       run_logs_module "true" "$BACKUP_DIR" "$EXPLAIN" "50"
       summary_add "logs: cleaned (threshold=50MB)"
+    fi
+    if [[ "${LOGS_FLAGGED_COUNT:-0}" -gt 0 && -n "${LOGS_FLAGGED_IDS_LIST:-}" ]]; then
+      _summary_add_list "logs" "${LOGS_FLAGGED_IDS_LIST}" 50
     fi
     ;;
   permissions-only)
@@ -447,6 +486,9 @@ case "$MODE" in
     ensure_inventory
     run_disk_module "scan" "false" "$BACKUP_DIR" "$EXPLAIN" "$inventory_index_file"
     summary_add "disk: inspected (flagged=${DISK_FLAGGED_COUNT:-0} total_mb=${DISK_TOTAL_MB:-0} printed=${DISK_PRINTED_COUNT:-0} threshold_mb=${DISK_THRESHOLD_MB:-0})"
+    if [[ "${DISK_FLAGGED_COUNT:-0}" -gt 0 && -n "${DISK_FLAGGED_IDS_LIST:-}" ]]; then
+      _summary_add_list "disk" "${DISK_FLAGGED_IDS_LIST}" 50
+    fi
     ;;
   *)
     echo "Unknown mode: $MODE"

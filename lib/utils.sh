@@ -3,13 +3,24 @@
 # Purpose: Provide small, reusable helpers for logging, command detection, and temporary file creation
 # Safety: Pure helper functions; no file moves, no privilege escalation, no destructive operations
 
-set -euo pipefail
-
 # ----------------------------
 # Logging
 # ----------------------------
 ts() { date +"%Y-%m-%d %H:%M:%S"; }
 log() { printf "[%s] %s\n" "$(ts)" "$*"; }
+
+# Compatibility aliases (modules and entrypoint may call these)
+log_info()  { log "$@"; }
+log_warn()  { log "$@"; }
+log_error() { log "$@"; }
+
+# Purpose: Log an error message and exit non-zero
+# Usage: die "message" [exit_code]
+die() {
+  local msg="${1:-}"; local code="${2:-1}"
+  log_error "$msg"
+  exit "$code"
+}
 
 # Explain logging (only when --explain is enabled)
 explain_log() {

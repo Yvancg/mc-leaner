@@ -10,6 +10,34 @@ This project follows a pragmatic versioning scheme:
 
 ---
 
+## v2.1.0 — Disk inspection, flagged IDs export and run summary improvements
+
+**Release date:** 2026-01-26
+
+### Added
+
+- Disk inspection module
+  - Adds a system lens for large disk consumers with inventory-backed owner attribution
+  - Flags paths above the configured threshold and summarizes total flagged size
+
+- Flagged item identifier exports
+  - All flag-capable modules now export newline-delimited `*_FLAGGED_IDS_LIST` variables
+  - Enables consistent, structured reporting of *what* was flagged, not just counts
+
+- Clean, multi-line run summary output
+
+### Changed
+
+- Run summary now includes flagged counts and sizes per module
+- Improved output formatting for better readability in terminal and logs
+
+### Fixed
+
+- Edge cases in flagged ID exports causing empty lines
+- Run summary misalignment on narrow terminals
+
+---
+
 ## v2.0.0 — Contracted core, startup inspection & system lenses
 
 **Release date:** 2026-01-24

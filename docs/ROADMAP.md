@@ -184,6 +184,35 @@ All modules now follow a consistent interface, output format, and safety model.
 
 Status: **stable major release**
 
+## v2.1.0 (released)
+
+Focus: **flag transparency and disk visibility**
+
+This release strengthens mc-leaner’s inspection guarantees by making all flagged items explicit in the run summary and by introducing disk usage inspection as a first-class module.
+
+### Implemented modules
+
+#### Disk inspection (inspection-first)
+
+- Inspect large disk consumers across common user and system locations
+- Flag paths exceeding a configurable size threshold (default: 200MB)
+- Attribute ownership using the inventory index when possible
+- Classify disk usage by category (e.g. Toolchains, Apps, Data)
+- Inspection-only by default; no deletion or mutation
+
+### Cross-module improvements
+
+- Explicit flagged-item reporting
+  - All flag-capable modules now export newline-delimited flagged identifiers
+  - Run summary lists every flagged item per module
+  - Output is stable, readable, and automation-friendly
+
+- Simplified execution model
+  - Removed per-module duration tracking
+  - Retained a single end-to-end runtime measurement
+
+Status: **released**
+
 ---
 
 ## v2.x (medium term)
@@ -195,12 +224,12 @@ This phase remains strictly CLI-first and inspection-only.
 
 ### Planned modules
 
-#### Disk usage attribution
+#### Disk usage attribution (extended)
 
-- Attribute disk usage by app bundle ID and toolchain
-- Correlate caches, logs, leftovers, binaries, and Homebrew assets
-- Surface top disk consumers by inferred owner
-- Explain mode showing attribution logic
+- Build on the v2.1.0 disk inspection module
+- Correlate disk usage across caches, logs, leftovers, binaries, and Homebrew assets
+- Attribute disk usage more precisely by app bundle ID and toolchain
+- Explain mode showing cross-module attribution logic
 
 #### Binary provenance & trust metadata
 

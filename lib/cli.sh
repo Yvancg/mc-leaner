@@ -21,14 +21,18 @@ EXPLAIN="false"
 
 usage() {
   cat <<'EOF'
-mc-leaner
+mc-leaner — inspection-first system hygiene with explicit run summaries
 
 Usage:
   bash mc-leaner.sh [--mode <scan|clean|report|inventory-only|launchd-only|startup-only|bins-only|caches-only|logs-only|brew-only|leftovers-only|permissions-only|disk-only>] [--apply] [--backup-dir <path>] [--explain]
 
 Defaults:
-  --mode scan     (dry-run, no moves)
+  --mode scan     (inspection-only; no moves)
   --apply         required for any move
+
+Notes:
+  - All inspection modes list every flagged item in the end-of-run summary
+  - Counts are always paired with explicit identifiers
 
 Options:
   --explain              Show why items are skipped or flagged (verbose; inspection-only)
@@ -39,6 +43,7 @@ Examples:
   bash mc-leaner.sh --mode report
   bash mc-leaner.sh --mode inventory-only
   bash mc-leaner.sh --mode startup-only
+  bash mc-leaner.sh --mode disk-only
   bash mc-leaner.sh --mode caches-only
   bash mc-leaner.sh --mode logs-only
   bash mc-leaner.sh --mode brew-only

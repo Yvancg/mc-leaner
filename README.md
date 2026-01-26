@@ -137,4 +137,3 @@ MIT License.
 This software is provided “as is”, without warranty of any kind.
 
 You are responsible for reviewing and approving every action.
-

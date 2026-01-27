@@ -43,6 +43,20 @@ fi
 run_launchd_module() {
   local mode="$1" apply="$2" backup_dir="$3"
   local inventory_index_file="${4:-}"
+
+  # Timing (best-effort wall clock duration for this module).
+  local _launchd_t0="" _launchd_t1=""
+  _launchd_t0="$(/bin/date +%s 2>/dev/null || echo '')"
+  LAUNCHD_DUR_S=0
+
+  _launchd_finish_timing() {
+    _launchd_t1="$(/bin/date +%s 2>/dev/null || echo '')"
+    if [[ -n "${_launchd_t0:-}" && -n "${_launchd_t1:-}" ]]; then
+      LAUNCHD_DUR_S=$((_launchd_t1 - _launchd_t0))
+    fi
+  }
+  trap _launchd_finish_timing RETURN
+
   local flagged_count=0
   local flagged_items=()
 
@@ -299,6 +313,7 @@ run_launchd_module() {
     log "Launchd: no orphaned plists found (by heuristics)."
     explain_log "Launchd: checked ${checked} plists."
     _launchd_summary_emit "${checked}"
+    _launchd_finish_timing
     return 0
   fi
 
@@ -326,7 +341,9 @@ run_launchd_module() {
   # Export flagged identifiers list for run summary consumption.
   LAUNCHD_FLAGGED_IDS_LIST="$(printf '%s\n' "${flagged_items[@]}")"
   LAUNCHD_FLAGGED_COUNT="${flagged_count}"
+  LAUNCHD_DUR_S="${LAUNCHD_DUR_S:-0}"
 
+  _launchd_finish_timing
   _launchd_summary_emit "${checked}"
 }
 

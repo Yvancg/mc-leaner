@@ -213,8 +213,8 @@ summary_add "mode=$MODE apply=$APPLY backup=$BACKUP_DIR"
 # ----------------------------
 # Summary helpers
 # ----------------------------
-_now_epoch_s() {
-  date +%s
+_now_epoch_s() { 
+  /bin/date +%s; 
 }
 
 _elapsed_s() {
@@ -289,7 +289,7 @@ case "$MODE" in
     summary_add "bins: inspected"
 
     # Use inventory index to label cache owners more accurately.
-    run_caches_module "scan" "false" "$BACKUP_DIR" "$inventory_index_file"
+    run_caches_module "scan" "false" "$BACKUP_DIR" "$EXPLAIN" "$inventory_index_file"
     summary_add "caches: inspected"
     if [[ "${CACHES_FLAGGED_COUNT:-0}" -gt 0 && -n "${CACHES_FLAGGED_IDS_LIST:-}" ]]; then
       _summary_add_list "caches" "${CACHES_FLAGGED_IDS_LIST}" 50
@@ -306,12 +306,15 @@ case "$MODE" in
     # STARTUP_UNKNOWN_OWNER_COUNT, STARTUP_BOOT_FLAGGED_COUNT, STARTUP_LOGIN_FLAGGED_COUNT,
     # STARTUP_SURFACE_BREAKDOWN, STARTUP_THRESHOLD_MODE
     run_startup_module "scan" "false" "$BACKUP_DIR" "$EXPLAIN" "$inventory_index_file"
-    summary_add "startup: inspected (checked=${STARTUP_CHECKED_COUNT:-0} flagged=${STARTUP_FLAGGED_COUNT:-0} boot_flagged=${STARTUP_BOOT_FLAGGED_COUNT:-0} login_flagged=${STARTUP_LOGIN_FLAGGED_COUNT:-0} unknown_owner=${STARTUP_UNKNOWN_OWNER_COUNT:-0} surface=${STARTUP_SURFACE_BREAKDOWN:-n/a})"
+    summary_add "startup: inspected=${STARTUP_CHECKED_COUNT:-0} flagged=${STARTUP_FLAGGED_COUNT:-0}"
+    summary_add "startup:   boot: flagged=${STARTUP_BOOT_FLAGGED_COUNT:-0}"
+    summary_add "startup:   login: flagged=${STARTUP_LOGIN_FLAGGED_COUNT:-0}"
+    summary_add "startup:   estimated_risk=${STARTUP_ESTIMATED_RISK:-low}"
     if [[ "${STARTUP_FLAGGED_COUNT:-0}" -gt 0 && -n "${STARTUP_FLAGGED_IDS_LIST:-}" ]]; then
       _summary_add_list "startup" "${STARTUP_FLAGGED_IDS_LIST}"
     fi
     if [[ "${STARTUP_BOOT_FLAGGED_COUNT:-0}" -gt 0 ]]; then
-      summary_add "startup: risk_hint=boot-time items flagged; review launchd labels/login items before disabling"
+      summary_add "risk: startup_items_may_slow_boot"
     fi
     # Disk usage attribution (inspection-only; never modifies system state)
     run_disk_module "scan" "false" "$BACKUP_DIR" "$EXPLAIN" "$inventory_index_file"
@@ -346,7 +349,7 @@ case "$MODE" in
     run_bins_module "clean" "true" "$BACKUP_DIR" "$inventory_index_file" "$brew_bins_file"
     summary_add "bins: cleaned"
 
-    run_caches_module "clean" "true" "$BACKUP_DIR" "$inventory_index_file"
+    run_caches_module "clean" "true" "$BACKUP_DIR" "$EXPLAIN" "$inventory_index_file"
     summary_add "caches: cleaned"
     if [[ "${CACHES_FLAGGED_COUNT:-0}" -gt 0 && -n "${CACHES_FLAGGED_IDS_LIST:-}" ]]; then
       _summary_add_list "caches" "${CACHES_FLAGGED_IDS_LIST}" 50
@@ -363,12 +366,15 @@ case "$MODE" in
     # STARTUP_UNKNOWN_OWNER_COUNT, STARTUP_BOOT_FLAGGED_COUNT, STARTUP_LOGIN_FLAGGED_COUNT,
     # STARTUP_SURFACE_BREAKDOWN, STARTUP_THRESHOLD_MODE
     run_startup_module "scan" "false" "$BACKUP_DIR" "$EXPLAIN" "$inventory_index_file"
-    summary_add "startup: inspected (checked=${STARTUP_CHECKED_COUNT:-0} flagged=${STARTUP_FLAGGED_COUNT:-0} boot_flagged=${STARTUP_BOOT_FLAGGED_COUNT:-0} login_flagged=${STARTUP_LOGIN_FLAGGED_COUNT:-0} unknown_owner=${STARTUP_UNKNOWN_OWNER_COUNT:-0} surface=${STARTUP_SURFACE_BREAKDOWN:-n/a})"
+    summary_add "startup: inspected=${STARTUP_CHECKED_COUNT:-0} flagged=${STARTUP_FLAGGED_COUNT:-0}"
+    summary_add "startup:   boot: flagged=${STARTUP_BOOT_FLAGGED_COUNT:-0}"
+    summary_add "startup:   login: flagged=${STARTUP_LOGIN_FLAGGED_COUNT:-0}"
+    summary_add "startup:   estimated_risk=${STARTUP_ESTIMATED_RISK:-low}"
     if [[ "${STARTUP_FLAGGED_COUNT:-0}" -gt 0 && -n "${STARTUP_FLAGGED_IDS_LIST:-}" ]]; then
       _summary_add_list "startup" "${STARTUP_FLAGGED_IDS_LIST}"
     fi
     if [[ "${STARTUP_BOOT_FLAGGED_COUNT:-0}" -gt 0 ]]; then
-      summary_add "startup: risk_hint=boot-time items flagged; review launchd labels/login items before disabling"
+      summary_add "risk: startup_items_may_slow_boot"
     fi
     # Disk usage attribution (inspection-only; never modifies system state)
     run_disk_module "scan" "false" "$BACKUP_DIR" "$EXPLAIN" "$inventory_index_file"
@@ -430,11 +436,11 @@ case "$MODE" in
   caches-only)
     if [[ "$APPLY" != "true" ]]; then
       ensure_inventory
-      run_caches_module "scan" "false" "$BACKUP_DIR" "$inventory_index_file"
+      run_caches_module "scan" "false" "$BACKUP_DIR" "$EXPLAIN" "$inventory_index_file"
       summary_add "caches: inspected"
     else
       ensure_inventory
-      run_caches_module "clean" "true" "$BACKUP_DIR" "$inventory_index_file"
+      run_caches_module "clean" "true" "$BACKUP_DIR" "$EXPLAIN" "$inventory_index_file"
       summary_add "caches: cleaned"
     fi
     if [[ "${CACHES_FLAGGED_COUNT:-0}" -gt 0 && -n "${CACHES_FLAGGED_IDS_LIST:-}" ]]; then
@@ -472,12 +478,15 @@ case "$MODE" in
     # STARTUP_UNKNOWN_OWNER_COUNT, STARTUP_BOOT_FLAGGED_COUNT, STARTUP_LOGIN_FLAGGED_COUNT,
     # STARTUP_SURFACE_BREAKDOWN, STARTUP_THRESHOLD_MODE
     run_startup_module "scan" "false" "$BACKUP_DIR" "$EXPLAIN" "$inventory_index_file"
-    summary_add "startup: inspected (checked=${STARTUP_CHECKED_COUNT:-0} flagged=${STARTUP_FLAGGED_COUNT:-0} boot_flagged=${STARTUP_BOOT_FLAGGED_COUNT:-0} login_flagged=${STARTUP_LOGIN_FLAGGED_COUNT:-0} unknown_owner=${STARTUP_UNKNOWN_OWNER_COUNT:-0} surface=${STARTUP_SURFACE_BREAKDOWN:-n/a})"
+    summary_add "startup: inspected=${STARTUP_CHECKED_COUNT:-0} flagged=${STARTUP_FLAGGED_COUNT:-0}"
+    summary_add "startup:   boot: flagged=${STARTUP_BOOT_FLAGGED_COUNT:-0}"
+    summary_add "startup:   login: flagged=${STARTUP_LOGIN_FLAGGED_COUNT:-0}"
+    summary_add "startup:   estimated_risk=${STARTUP_ESTIMATED_RISK:-low}"
     if [[ "${STARTUP_FLAGGED_COUNT:-0}" -gt 0 && -n "${STARTUP_FLAGGED_IDS_LIST:-}" ]]; then
       _summary_add_list "startup" "${STARTUP_FLAGGED_IDS_LIST}"
     fi
     if [[ "${STARTUP_BOOT_FLAGGED_COUNT:-0}" -gt 0 ]]; then
-      summary_add "startup: risk_hint=boot-time items flagged; review launchd labels/login items before disabling"
+      summary_add "risk: startup_items_may_slow_boot"
     fi
     ;;
   disk-only)
@@ -495,6 +504,6 @@ case "$MODE" in
     ;;
 esac
 
-summary_add "timing: total_dur_s=$(_elapsed_s "$run_started_s")"
+summary_add "timing: startup=${STARTUP_DUR_S:-0}s launchd=${LAUNCHD_DUR_S:-0}s caches=${CACHES_DUR_S:-0}s logs=${LOGS_DUR_S:-0}s disk=${DISK_DUR_S:-0}s leftovers=${LEFTOVERS_DUR_S:-0}s total=$(_elapsed_s "$run_started_s")s"
 summary_print
 log "Done."  # End of run

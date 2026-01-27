@@ -22,6 +22,7 @@
 # - LEFTOVERS_FLAGGED_COUNT: number of LEFTOVER? findings emitted
 # - LEFTOVERS_FLAGGED_ITEMS: array of pre-formatted summary lines
 # - LEFTOVERS_MOVE_FAILURES: array of pre-formatted move failure lines (apply-mode)
+# - LEFTOVERS_DUR_S: best-effort wall clock duration in seconds for this module
 #
 # Scope (user-level only)
 # - ~/Library/Application Support
@@ -45,8 +46,12 @@ LEFTOVERS_FLAGGED_COUNT=0
 # Format: one string per item (pre-formatted for display).
 LEFTOVERS_FLAGGED_ITEMS=()
 
+#
 # Newline-delimited list of flagged identifiers (paths) for run-summary consumption.
 LEFTOVERS_FLAGGED_IDS_LIST=""
+
+# Wall clock duration (seconds, best-effort) for this module.
+LEFTOVERS_DUR_S=0
 
 
 # Summary list of move failures for end-of-run legibility (apply-mode only).
@@ -245,6 +250,20 @@ run_leftovers_module() {
   local inventory_file="${4:-}"
   local inventory_index_file="${5:-${INVENTORY_INDEX_FILE:-}}"
 
+  # Timing (best-effort wall clock duration for this module).
+  local _leftovers_t0="" _leftovers_t1=""
+  _leftovers_t0="$(/bin/date +%s 2>/dev/null || echo '')"
+  LEFTOVERS_DUR_S=0
+
+  _leftovers_finish_timing() {
+    # Must be safe under `set -u` and when invoked on early returns.
+    _leftovers_t1="$(/bin/date +%s 2>/dev/null || echo '')"
+    if [[ -n "${_leftovers_t0:-}" && -n "${_leftovers_t1:-}" ]]; then
+      LEFTOVERS_DUR_S=$((_leftovers_t1 - _leftovers_t0))
+    fi
+  }
+  trap _leftovers_finish_timing RETURN
+
   log "Leftovers: scanning user-level support locations (inspection-first)..."
   if [[ "$explain" == "true" ]]; then
     explain_log "Leftovers (explain): using inventory file: ${inventory_file}"
@@ -377,6 +396,8 @@ run_leftovers_module() {
 
   # Normalize export (strip trailing newline if present).
   LEFTOVERS_FLAGGED_IDS_LIST="$(printf '%s' "${LEFTOVERS_FLAGGED_IDS_LIST}" | sed '$s/\n$//')"
+
+  _leftovers_finish_timing
   _leftovers_summary_emit
 }
 

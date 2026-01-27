@@ -23,14 +23,41 @@ fi
 # Module entry point
 # ----------------------------
 run_caches_module() {
-  local mode="$1"        # scan|clean
-  local apply="$2"       # true|false
-  local backup_dir="$3"
+  # Contract:
+  #   run_caches_module <mode> <apply> <backup_dir> <explain> [inventory_index_file]
+  local mode="${1:-scan}"        # scan|clean
+  local apply="${2:-false}"      # true|false
+  local backup_dir="${3:-}"
+  local explain="${4:-false}"
+  local inventory_index_file="${5:-}"
+
+  # Reserved args for contract consistency.
+  : "${mode}" "${backup_dir}" "${inventory_index_file}"
+
+  # Explain flag used throughout via EXPLAIN.
+  EXPLAIN="${explain}"
+
+  # Timing (best-effort wall clock duration for this module).
+  local _caches_t0="" _caches_t1=""
+  _caches_t0="$(/bin/date +%s 2>/dev/null || echo '')"
+  CACHES_DUR_S=0
+
+  _caches_finish_timing() {
+    # Must be safe under `set -u` and when invoked on early returns.
+    _caches_t1="$(/bin/date +%s 2>/dev/null || echo '')"
+    if [[ -n "${_caches_t0:-}" && -n "${_caches_t1:-}" ]]; then
+      CACHES_DUR_S=$((_caches_t1 - _caches_t0))
+    fi
+  }
+  trap _caches_finish_timing RETURN
 
   # ----------------------------
   # Helper: _inventory_ready (moved before first use)
   # ----------------------------
   _inventory_ready() {
+    if [[ -n "${inventory_index_file:-}" && -f "${inventory_index_file:-}" ]]; then
+      return 0
+    fi
     [[ "${INVENTORY_READY:-false}" == "true" ]] && [[ -n "${INVENTORY_INDEX_FILE:-}" ]] && [[ -f "${INVENTORY_INDEX_FILE:-}" ]]
   }
 
@@ -75,6 +102,7 @@ run_caches_module() {
     # Index format (expected): key<TAB>name<TAB>source<TAB>path
     # Defensive: tolerate variable field counts.
     local key="$1"
+    local idx_file="${inventory_index_file:-${INVENTORY_INDEX_FILE:-}}"
     local out
 
     _inventory_ready || return 1
@@ -92,7 +120,7 @@ run_caches_module() {
           if (name!="") { print name; exit }
           print $0; exit
         }
-      ' "${INVENTORY_INDEX_FILE}" 2>/dev/null
+      ' "${idx_file}" 2>/dev/null
     )"
 
     [[ -n "$out" ]] || return 1
@@ -474,6 +502,9 @@ run_caches_module() {
 
   # Export flagged identifiers list (paths) for run summary consumption.
   CACHES_FLAGGED_IDS_LIST="$(printf '%s\n' "${flagged_ids[@]}")"
+
+  # Ensure timing is computed before returning from the module.
+  _caches_finish_timing
 
   summary_add "Caches flagged=${flagged_count} total_mb=${overall_total_mb} moved=${moved_count} failures=${#move_failures[@]} scanned=${scanned_dirs} (threshold=${min_mb}MB)"
 }

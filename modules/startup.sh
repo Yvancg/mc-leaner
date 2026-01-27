@@ -10,6 +10,46 @@ set -o pipefail
 # Contract: run_startup_module <mode> <apply> <backup_dir> <explain> [inventory_index]
 # Note: Kept near the top so simple greps and partial prints (e.g., `sed -n '1,260p'`) will find it.
 
+# -----------------------------------------------------------------------------
+# Contract: startup module output + summary (v2.2.0)
+# -----------------------------------------------------------------------------
+# Safety
+#   - Inspection-only. Never modifies launchd, login items, or system state.
+#   - `mode=clean` or `apply=true` must still perform a scan only.
+#
+# Item line format (v2.2.0+; existing fields are stable; new fields may be appended only)
+#   STARTUP? <timing> | source: <source> | owner: <owner> | conf: <conf> | label: <label> | exec: <exec>
+#   (v2.2.0+) appends: `impact: <impact>` immediately after `conf:`
+#
+# Required fields
+#   - timing: boot | login | on-demand
+#   - source: LaunchAgent | LaunchDaemon | LoginItem
+#   - owner: Apple (system) | <vendor/product string> | Unknown
+#   - conf: high | medium | low
+#   - impact (v2.2.0+): low | medium | high
+#   - label: best-effort identifier (launchd Label or plist basename; login item name)
+#   - exec: best-effort executable path or '-' when unavailable
+#
+# Output guarantees
+#   - Each discovered startup surface item emits exactly one STARTUP? line.
+#   - No STARTUP? line is suppressed due to errors; failures degrade to best-effort fields (e.g., exec='-').
+#   - `impact` (v2.2.0+) is best-effort heuristic attribution only; it is not a recommendation and must not imply action.
+#
+# Summary globals (exported for mc-leaner.sh RUN SUMMARY)
+#   - STARTUP_CHECKED_COUNT: integer (items inspected)
+#   - STARTUP_FLAGGED_COUNT: integer (items flagged)
+#   - STARTUP_BOOT_FLAGGED_COUNT: integer
+#   - STARTUP_LOGIN_FLAGGED_COUNT: integer (includes on-demand items)
+#   - STARTUP_FLAGGED_IDS_LIST: newline-separated identifiers (labels or names)
+#   - STARTUP_DUR_S (v2.2.0+): integer seconds (best-effort; wall clock duration for this module). May be unset if timing is disabled by the runner.
+#
+# RUN SUMMARY expectations (rendered by the runner)
+#   startup: inspected=<n> flagged=<n>
+#     boot: flagged=<n>
+#     login: flagged=<n>
+#     estimated_risk=<low|medium|high>
+#   risk: startup_items_may_slow_boot        # only when boot_flagged > 0
+
 # ----------------------------------------------------------------------------
 # Logging fallbacks (when module is run standalone)
 # ----------------------------------------------------------------------------
@@ -170,18 +210,118 @@ _startup_inventory_owner() {
 }
 
 # -----------------------------------------------------------------------------
+# Impact scoring (v2.2.0)
+# -----------------------------------------------------------------------------
+
+_startup_lc() {
+  # Lowercase helper (bash 3.2 compatible)
+  echo "$1" | tr '[:upper:]' '[:lower:]'
+}
+
+_startup_infer_impact() {
+  # Best-effort impact attribution. Output: low | medium | high
+  # Inputs: timing label exec_path owner conf
+  local timing="$1" label="$2" exec_path="$3" owner="$4" conf="$5"
+
+  local score=0
+
+  # Timing
+  case "${timing}" in
+    boot) score=$((score + 3)) ;;
+    login) score=$((score + 2)) ;;
+    on-demand) score=$((score + 0)) ;;
+    *) score=$((score + 0)) ;;
+  esac
+
+  # Ownership / trust
+  if [[ "${owner}" == "Apple (system)" && "${conf}" == "high" ]]; then
+    score=$((score - 4))
+  elif [[ "${owner}" == "Unknown" ]]; then
+    score=$((score + 3))
+  else
+    case "${conf}" in
+      low) score=$((score + 2)) ;;
+      medium) score=$((score + 1)) ;;
+      *) : ;;
+    esac
+  fi
+
+  # Binary location (exec path)
+  if [[ -z "${exec_path}" || "${exec_path}" == "-" ]]; then
+    score=$((score + 1))
+  elif [[ "${exec_path}" == /System/* || "${exec_path}" == /usr/libexec/* ]]; then
+    score=$((score - 2))
+  elif [[ "${exec_path}" == /Applications/* ]]; then
+    score=$((score + 1))
+  elif [[ "${exec_path}" == /Users/* || "${exec_path}" == /Library/* ]]; then
+    score=$((score + 2))
+  fi
+
+  # Known heavy categories (take max; do not sum)
+  local hay="$( _startup_lc "${label} ${exec_path}" )"
+  local cat=0
+
+  # virtualization
+  if echo "${hay}" | grep -Eq '(vmware|virtualbox|parallels|qemu|utm)'; then
+    cat=3
+  # sync / backup / cloud drive
+  elif echo "${hay}" | grep -Eq '(dropbox|onedrive|google drive|googledrive|box|nextcloud|sync)'; then
+    cat=2
+  # security / endpoint / vpn
+  elif echo "${hay}" | grep -Eq '(crowdstrike|falcon|sentinelone|carbonblack|defender|symantec|sophos|antivirus|malware|vpn|zscaler|globalprotect|paloalto)'; then
+    cat=2
+  # dev tooling
+  elif echo "${hay}" | grep -Eq '(docker|k8s|kubernetes|colima|rancher|homebrew|brew)'; then
+    cat=1
+  fi
+
+  score=$((score + cat))
+
+  # Map score to impact
+  local impact="low"
+  if [[ ${score} -ge 6 ]]; then
+    impact="high"
+  elif [[ ${score} -ge 2 ]]; then
+    impact="medium"
+  fi
+
+  # Caps and overrides
+  if [[ "${timing}" == "on-demand" && "${impact}" == "high" ]]; then
+    impact="medium"
+  fi
+
+  if [[ ( -z "${exec_path}" || "${exec_path}" == "-" ) && "${owner}" != "Unknown" && "${impact}" == "high" ]]; then
+    impact="medium"
+  fi
+
+  if [[ "${owner}" == "Apple (system)" && "${conf}" == "high" && "${impact}" == "high" ]]; then
+    impact="medium"
+  fi
+
+  if [[ "${owner}" == "Unknown" && "${timing}" == "boot" ]]; then
+    impact="high"
+  fi
+
+  echo "${impact}"
+}
+
+# -----------------------------------------------------------------------------
 # Output
 # -----------------------------------------------------------------------------
 
 _startup_emit_item() {
-  # Inputs: explain timing source label exec_path owner how conf
-  local explain="$1" timing="$2" source="$3" label="$4" exec_path="$5" owner="$6" how="$7" conf="$8"
+  # Inputs: explain timing source label exec_path owner how conf impact
+  local explain="$1" timing="$2" source="$3" label="$4" exec_path="$5" owner="$6" how="$7" conf="$8" impact="$9"
 
   if [[ -z "${exec_path}" ]]; then
     exec_path="-"
   fi
 
-  log_info "STARTUP? ${timing} | source: ${source} | owner: ${owner} | conf: ${conf} | label: ${label} | exec: ${exec_path}"
+  if [[ -z "${impact}" ]]; then
+    impact="low"
+  fi
+
+  log_info "STARTUP? ${timing} | source: ${source} | owner: ${owner} | conf: ${conf} | impact: ${impact} | label: ${label} | exec: ${exec_path}"
   _startup_explain "${explain}" "Startup item | timing=${timing} | source=${source} | label=${label} | exec=${exec_path} | attribution=${how} | confidence=${conf}"
 }
 
@@ -206,7 +346,10 @@ _startup_scan_launchd_dir() {
     how="${owner_meta#*|}"; how="${how%%|*}"
     conf="${owner_meta##*|}"
 
-    _startup_emit_item "${explain}" "${timing}" "${source}" "${label}" "${exec_path}" "${owner}" "${how}" "${conf}"
+    local impact=""
+    impact="$(_startup_infer_impact "${timing}" "${label}" "${exec_path}" "${owner}" "${conf}")"
+
+    _startup_emit_item "${explain}" "${timing}" "${source}" "${label}" "${exec_path}" "${owner}" "${how}" "${conf}" "${impact}"
 
     STARTUP_CHECKED=$((STARTUP_CHECKED + 1))
 
@@ -221,6 +364,10 @@ _startup_scan_launchd_dir() {
         STARTUP_FLAGGED=$((STARTUP_FLAGGED + 1))
         STARTUP_UNKNOWN=$((STARTUP_UNKNOWN + 1))
         STARTUP_FLAGGED_IDS+=("${label:-$plist}")
+
+        if [[ "${impact}" == "high" ]]; then
+          STARTUP_IMPACT_HIGH=$((STARTUP_IMPACT_HIGH + 1))
+        fi
 
         # Surface breakdown for run summary
         # Treat "on-demand" as login surface for summary purposes.
@@ -275,7 +422,10 @@ APPLESCRIPT
     how="${owner_meta#*|}"; how="${how%%|*}"
     conf="${owner_meta##*|}"
 
-    _startup_emit_item "${explain}" "${timing}" "LoginItem" "${label}" "${exec_path}" "${owner}" "${how}" "${conf}"
+    local impact=""
+    impact="$(_startup_infer_impact "${timing}" "${label}" "${exec_path}" "${owner}" "${conf}")"
+
+    _startup_emit_item "${explain}" "${timing}" "LoginItem" "${label}" "${exec_path}" "${owner}" "${how}" "${conf}" "${impact}"
 
     STARTUP_CHECKED=$((STARTUP_CHECKED + 1))
     if [[ "${owner}" == "Unknown" ]]; then
@@ -283,6 +433,9 @@ APPLESCRIPT
       STARTUP_UNKNOWN=$((STARTUP_UNKNOWN + 1))
       STARTUP_FLAGGED_IDS+=("${label}")
       STARTUP_LOGIN_FLAGGED=$((STARTUP_LOGIN_FLAGGED + 1))
+      if [[ "${impact}" == "high" ]]; then
+        STARTUP_IMPACT_HIGH=$((STARTUP_IMPACT_HIGH + 1))
+      fi
     fi
   done <<<"${items}"
 }
@@ -301,12 +454,16 @@ run_startup_module() {
 
   : "${backup_dir}" "${inventory_index}" # reserved for contract consistency
 
+  local _startup_t0="" _startup_t1=""
+  _startup_t0="$(/bin/date +%s 2>/dev/null || echo '')"
+
   # Summary counters (exported via globals for mc-leaner.sh run summary)
   STARTUP_CHECKED=0
   STARTUP_FLAGGED=0
   STARTUP_UNKNOWN=0
   STARTUP_BOOT_FLAGGED=0
   STARTUP_LOGIN_FLAGGED=0
+  STARTUP_IMPACT_HIGH=0
   STARTUP_SURFACE="launchd+loginitems"
 
   # Compatibility aliases for mc-leaner.sh summary naming.
@@ -317,6 +474,7 @@ run_startup_module() {
   STARTUP_LOGIN_FLAGGED_COUNT=0
   STARTUP_SURFACE_BREAKDOWN="${STARTUP_SURFACE}"
   STARTUP_THRESHOLD_MODE="n/a"
+  STARTUP_ESTIMATED_RISK="low"
 
   # Collect identifiers for flagged startup items (prefer label; fall back to plist path).
   STARTUP_FLAGGED_IDS=()
@@ -339,6 +497,20 @@ run_startup_module() {
   # Export flagged identifiers for run summary consumption.
   STARTUP_FLAGGED_IDS_LIST="$(printf '%s\n' "${STARTUP_FLAGGED_IDS[@]}")"
 
+  # Timing (best-effort wall clock duration for this module).
+  _startup_t1="$(/bin/date +%s 2>/dev/null || echo '')"
+  if [[ -n "${_startup_t0}" && -n "${_startup_t1}" ]]; then
+    STARTUP_DUR_S=$((_startup_t1 - _startup_t0))
+  fi
+
+  # Estimated risk (v2.2.0): conservative summary hinting.
+  STARTUP_ESTIMATED_RISK="low"
+  if [[ "${STARTUP_IMPACT_HIGH:-0}" -ge 3 || ( "${STARTUP_IMPACT_HIGH:-0}" -ge 1 && "${STARTUP_BOOT_FLAGGED:-0}" -ge 3 ) ]]; then
+    STARTUP_ESTIMATED_RISK="high"
+  elif [[ "${STARTUP_IMPACT_HIGH:-0}" -ge 1 || "${STARTUP_FLAGGED:-0}" -ge 10 ]]; then
+    STARTUP_ESTIMATED_RISK="medium"
+  fi
+
   # Sync compatibility aliases for mc-leaner.sh summary.
   STARTUP_CHECKED_COUNT="${STARTUP_CHECKED}"
   STARTUP_FLAGGED_COUNT="${STARTUP_FLAGGED}"
@@ -346,6 +518,7 @@ run_startup_module() {
   STARTUP_BOOT_FLAGGED_COUNT="${STARTUP_BOOT_FLAGGED}"
   STARTUP_LOGIN_FLAGGED_COUNT="${STARTUP_LOGIN_FLAGGED}"
   STARTUP_SURFACE_BREAKDOWN="${STARTUP_SURFACE}"
+  STARTUP_ESTIMATED_RISK="${STARTUP_ESTIMATED_RISK}"
 
   log_info "Startup: inspected ${STARTUP_CHECKED} item(s); flagged ${STARTUP_FLAGGED} (unknown owner ${STARTUP_UNKNOWN})"
 }

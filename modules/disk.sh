@@ -12,6 +12,7 @@
 #       - DISK_FLAGGED_COUNT (int) : number of items >= DISK_THRESHOLD_MB (across all scanned candidates)
 #       - DISK_TOTAL_MB      (int) : total MB across flagged items (sum of mb values)
 #       - DISK_PRINTED_COUNT (int) : number of items emitted (<= DISK_TOP_N)
+#       - DISK_DUR_S        (int) : best-effort wall clock duration in seconds for this module
 #       - DISK_THRESHOLD_MB  (int) : threshold used for flagging (MB)
 #       - DISK_TOP_N         (int) : maximum items emitted
 #   - Entry point signature:
@@ -310,6 +311,11 @@ run_disk_module() {
   # Reserved args for contract consistency (unused here).
   : "${mode}" "${backup_dir}"
 
+  # Timing (best-effort wall clock duration for this module).
+  local _disk_t0="" _disk_t1=""
+  _disk_t0="$(/bin/date +%s 2>/dev/null || echo '')"
+  DISK_DUR_S=0
+
 
   # Explain flag is used throughout via DISK_EXPLAIN.
   DISK_EXPLAIN="${explain}"
@@ -382,6 +388,11 @@ run_disk_module() {
 
   # Export flagged identifiers list for run summary consumption.
   DISK_FLAGGED_IDS_LIST="$(printf '%s\n' "${_disk_flagged_ids[@]}")"
+
+  _disk_t1="$(/bin/date +%s 2>/dev/null || echo '')"
+  if [[ -n "${_disk_t0}" && -n "${_disk_t1}" ]]; then
+    DISK_DUR_S=$((_disk_t1 - _disk_t0))
+  fi
 
   log_info "Disk: inspected ${checked} item(s); flagged=${flagged} total_mb=${total_mb} printed=${printed} (top_n=${top_n} threshold=${min_mb}MB)"
 }

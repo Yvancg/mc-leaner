@@ -206,6 +206,20 @@ run_logs_module() {
   local explain="$3"
   local threshold_mb="$4"
 
+  # Timing (best-effort wall clock duration for this module).
+  local _logs_t0="" _logs_t1=""
+  _logs_t0="$(/bin/date +%s 2>/dev/null || echo '')"
+  LOGS_DUR_S=0
+
+  _logs_finish_timing() {
+    # Must be safe under `set -u` and when invoked on early returns.
+    _logs_t1="$(/bin/date +%s 2>/dev/null || echo '')"
+    if [[ -n "${_logs_t0:-}" && -n "${_logs_t1:-}" ]]; then
+      LOGS_DUR_S=$((_logs_t1 - _logs_t0))
+    fi
+  }
+  trap _logs_finish_timing RETURN
+
   EXPLAIN="$explain"
 
   # End-of-run contract arrays
@@ -289,6 +303,7 @@ run_logs_module() {
 
   if [[ "$found" -eq 0 ]]; then
     log "Logs: no large log items found (by threshold)."
+    _logs_finish_timing
     return 0
   fi
 
@@ -412,11 +427,13 @@ run_logs_module() {
   # Export flagged identifiers list (paths) for run summary consumption.
   LOGS_FLAGGED_IDS_LIST="$(printf '%s\n' "${flagged_ids[@]}")"
   LOGS_FLAGGED_COUNT="${#flagged_ids[@]}"
+  LOGS_DUR_S="${LOGS_DUR_S:-0}"
 
   # ----------------------------
   # Global summary contribution
   # ----------------------------
   if type summary_add >/dev/null 2>&1; then
+    _logs_finish_timing
     # Module Output Contract: end-of-run summary line
     # Format: <Module> flagged=<n> total_mb=<n> moved=<n> failures=<n>
     # Notes:

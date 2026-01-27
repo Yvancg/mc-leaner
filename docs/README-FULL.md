@@ -62,56 +62,22 @@ If you want to understand what is running on your system—and clean it safely�
 
 ## What mc-leaner does (current)
 
-
 As of v2.1.0, all modules follow a strict inspection-first contract, share a unified inventory core, and produce explicit, reviewable run summaries.
 
-### v2.2.0 — Startup impact & performance attribution
+### Release highlights
 
-This release builds on the v2.1.x inspection foundation by adding attribution and performance context, without changing any cleanup behavior.
+#### v2.2.0
 
-- Startup inspection now estimates relative impact per item (low, medium, high)
+**Startup impact & performance attribution**
+
+- Startup inspection now estimates impact per item (low, medium, high)
 - Run summary includes boot vs login flagged counts and a conservative startup risk signal
 - End-of-run timing includes per-module durations (startup, launchd, caches, logs, disk, leftovers)
 - No behavior changes: inspection-only, no disabling, unloading, or removal
 
-### v2.2.0 highlights — Startup impact & performance attribution
+#### v2.1.0
 
-- Startup inspection now estimates impact per item (low, medium, high)
-- Run summary includes boot vs login flagged counts and a conservative startup risk signal
-- End-of-run timing now includes per-module durations (startup, launchd, caches, logs, disk, leftovers)
-- No behavior changes: inspection only, no disabling or unloading
-
-### Inventory core (v2.0.0 – contract)
-
-- Introduces a centralized inventory index of installed software (apps, bundle IDs, Homebrew formulae and casks).
-- Used across modules to replace ad-hoc heuristics with consistent lookups.
-- Improves accuracy for ownership detection, installed-match decisions, and skip logic.
-- Runs once per execution and is reused by all inspection modules.
-- Fully explainable with --explain (sources, match type, normalization path).
-- Acts as the single source of truth for ownership, installed-state, and skip decisions across all modules.
-
-### Startup inspection (v2.0.0)
-
-- Inspects system and user startup mechanisms without modifying state
-- Sources include:
-  - launchd agents and daemons
-  - login items
-- Classifies startup entries by:
-  - boot vs login
-  - source type (LaunchAgent, LaunchDaemon, LoginItem)
-  - owner (Apple system, installed app, unknown)
-- Uses inventory to resolve known apps and bundle identifiers
-- Flags unknown or unmanaged startup items for review
-- Inspection-only; startup inspection never modifies system behavior
-- Fully explainable with --explain
-
-**v2.2.0 additions:**
-
-- Estimated startup impact classification (low, medium, high)
-- Aggregated boot vs login counts in the run summary
-- Conservative startup risk hint when boot-time items may slow startup
-
-### Disk inspection (v2.1.0)
+**Disk inspection & flag transparency**
 
 - Inspects large disk consumers across common user and system locations
 - Flags paths exceeding a configurable size threshold (default: 200MB)
@@ -125,72 +91,124 @@ This release builds on the v2.1.x inspection foundation by adding attribution an
 - Inspection-first by default; no files are removed
 - Designed to answer: *what is using my disk space, and why?*
 
-### Launchd hygiene
+**Flag transparency & structured reporting**
 
-- Scans:
-  - `/Library/LaunchAgents`
-  - `/Library/LaunchDaemons`
-  - `~/Library/LaunchAgents`
-- Detects **suspected orphaned or unmanaged** launchd plists by:
-  - skipping active `launchctl` jobs
-  - skipping known installed apps
-  - skipping Homebrew-managed services
-  - skipping known security and endpoint software
-- Uses inventory-based installed app and bundle-id resolution
-- Prompts before every action
-- Moves files to a **timestamped backup folder** on your Desktop
-- Supports `--explain` flag to provide detailed reasoning per item
+- Flag-capable modules now export newline-delimited `*_FLAGGED_IDS_LIST` variables
+  - startup, launchd, caches, logs, leftovers, disk
+- Enables consistent, structured reporting of *what* was flagged, not just counts
+- Run summary now includes:
+  - flagged item counts per module
+  - flagged sizes where applicable
+- Clean, multi-line run summary output suitable for terminals and logs
 
-### /usr/local/bin inspection
+#### v2.0.0
 
-(corresponds to `--mode bins-only`)
+**Inventory-backed inspection & startup visibility**
 
-- Optionally inspects `/usr/local/bin` for legacy or unmanaged binaries
-- Conservative and heuristic-based by design
-- Supports `--explain` flag to clarify detection logic
-- Uses inventory-backed Homebrew and installed-software correlation
+- Locks the v2 module contract and run summary semantics
+- All inspection modules rely on a shared, explicit inventory layer for ownership and installed-state decisions
+- Output format is stable and explainable for scripting and long-term support
 
-### Cache inspection (v1.1.0)
+**Startup inspection**
 
-- Inspects large user-level cache directories only:
-  - `~/Library/Caches/*`
-  - `~/Library/Containers/*/Data/Library/Caches`
-- Reports:
-  - cache size
-  - last modified time
-  - best-effort owning app or bundle identifier
-- Groups caches by app for easier review
-- Uses inventory-backed owner labeling and reduced false "unknown owner"
-- `--explain` flag shows top subfolders by size within each cache
+- Inspects LaunchDaemons, LaunchAgents, and Login Items
+- Classifies startup scope (boot vs login), source, owner, and execution path
+- Flags unknown or non-inventory-backed startup entries
+- Inspection-first design with no destructive actions
+
+**Module contract (v2) & orchestration**
+
+- Standardized entrypoint naming: `run_<module>_module`
+- Unified logging, `--explain` output, and run summary semantics
+- Deterministic module ordering with explicit availability checks and graceful degradation
+
+**Safety & resilience**
+
+- Hardened strict-shell behavior across modules (no silent failures under `set -u`)
+- Consistent non-destructive guarantees across inspection modules
+- Stable full-system scan and clean passes, including `--explain` coverage
+
+#### v1.6.0
+
+**Inventory-driven accuracy across all modules**
+
+- Adds the inventory core module for centralized discovery of:
+  - installed applications
+  - bundle identifiers
+  - executable roots
+- Shared inventory used consistently by caches, leftovers, bins, launchd, and intel modules
+- Lazy, on-demand population to reduce startup cost and unnecessary scans
+- Explicit readiness checks to prevent partial or inconsistent state usage
+
+**Fixes & reliability under strict shell**
+
+- Fixed unbound variable and array edge cases under strict shell settings
+- Corrected cache ownership reporting for Chromium-based applications
+- Eliminated inventory-dependent race conditions during `--explain` scans
+
+**Module improvements**
+
+- Caches: more accurate owner attribution and fewer false positives
+- Leftovers: stronger installed-app matching for group containers and bundle-id prefixes
+- Intel-only scan: stable root discovery via inventory-provided application paths and deduplicated roots
+- Orchestration: clearer module boundaries and more predictable execution order
+
+#### v1.5.0
+
+**Permissions inspection**
+
+- Inspects execution environment and permission boundaries
+- Detects:
+  - interactive vs non-interactive runs
+  - host application context (Terminal, VS Code, etc.)
+  - GUI prompt availability
+  - accessible vs restricted system locations
+- Explains why certain actions are skipped for safety
+- Integrated into full scan and available as `permissions-only` mode
+- Inspection-only; never performs cleanup actions
+- Supports `--explain`
+
+#### v1.4.0
+
+**App leftovers inspection**
+
+- Inspects user-level support locations for leftover data from uninstalled apps
+- Scans locations including:
+  - `~/Library/Containers`
+  - `~/Library/Group Containers`
+  - `~/Library/Application Support`
+  - `~/Library/Preferences`
+  - `~/Library/Saved Application State`
+- Uses bundle-id matching against installed apps to avoid false positives
+- Skips Apple/system-owned containers and protected software
+- Applies a size threshold (default: 50MB) to reduce noise
+- Uses inventory-first matching before heuristic normalization
 - Inspection-first by default (no moves)
 - Optional cleanup:
   - requires `--apply`
-  - user-confirmed per cache
-  - moves caches to backup (never deletes)
+  - user-confirmed per item
+  - relocates folders to backup (never deletes)
+- Designed for reviewing old app remnants, not active application data
 
-#### Example output (inspect mode)
+#### v1.3.0
 
-```text
-[2026-01-02 14:14:33] Caches: scanned 88 directories; found 2 >= 200MB.
+**Homebrew hygiene**
 
-CACHE GROUP: Google
-CACHE? 1799MB | modified: 2025-02-03 13:13:57 | owner: Google
-  path: ~/Library/Caches/Google
-  Subfolders (top 3 by size):
-    - 1799MB | Chrome
+- Inspection-first diagnostics for Homebrew-managed systems
+- Intended checks:
+  - orphaned formulae and casks
+  - unused dependencies
+  - outdated or disabled services
+  - stale cache and download artifacts
+- Read-only by default
+- No `brew cleanup`, `brew autoremove`, or destructive commands
+- Designed to explain *why* Homebrew reports certain states before suggesting actions
 
-CACHE GROUP: Homebrew
-CACHE? 438MB | modified: 2026-01-02 12:27:04 | owner: Homebrew
-  path: ~/Library/Caches/Homebrew
-  Subfolders (top 3 by size):
-    - 366MB | downloads
-    - 46MB  | api
-    - 13MB  | bootsnap
+This module focuses on **understanding Homebrew state**, not blindly cleaning it.
 
-Caches: total large caches (by heuristics): 3356MB
-```
+#### v1.2.0
 
-### Log inspection (v1.2.0)
+**Log inspection**
 
 - Inspects log files and directories exceeding a size threshold (default: 50MB)
 - Scans:
@@ -212,54 +230,76 @@ Caches: total large caches (by heuristics): 3356MB
   - moves logs to backup (never deletes)
   - system paths may require explicit confirmation and are skipped in non-interactive contexts
 
-### Homebrew hygiene (v1.3.0)
+#### v1.1.0
 
-- Inspection-first diagnostics for Homebrew-managed systems
-- Intended checks:
-  - orphaned formulae and casks
-  - unused dependencies
-  - outdated or disabled services
-  - stale cache and download artifacts
-- Read-only by default
-- No `brew cleanup`, `brew autoremove`, or destructive commands
-- Designed to explain *why* Homebrew reports certain states before suggesting actions
+**Cache inspection**
 
-This module will focus on **understanding Homebrew state**, not blindly cleaning it.
-
-### App leftovers inspection (v1.4.0)
-
-- Inspects user-level support locations for leftover data from uninstalled apps
-- Scans locations including:
-  - `~/Library/Containers`
-  - `~/Library/Group Containers`
-  - `~/Library/Application Support`
-  - `~/Library/Preferences`
-  - `~/Library/Saved Application State`
-- Uses bundle-id matching against installed apps to avoid false positives
-- Skips Apple/system-owned containers and protected software
-- Applies a size threshold (default: 50MB) to reduce noise
-- Uses inventory-first matching before heuristic normalization
+- Inspects large user-level cache directories only:
+  - `~/Library/Caches/*`
+  - `~/Library/Containers/*/Data/Library/Caches`
+- Reports:
+  - cache size
+  - last modified time
+  - best-effort owning app or bundle identifier
+- Groups caches by app for easier review
+- Uses inventory-backed owner labeling and reduced false "unknown owner"
+- `--explain` flag shows top subfolders by size within each cache
 - Inspection-first by default (no moves)
 - Optional cleanup:
   - requires `--apply`
-  - user-confirmed per item
-  - relocates folders to backup (never deletes)
-- Designed for reviewing old app remnants, not active application data
+  - user-confirmed per cache
+  - moves caches to backup (never deletes)
 
-### Permissions inspection (v1.5.0)
+##### Example output (inspect mode)
 
-- Inspects execution environment and permission boundaries
-- Detects:
-  - interactive vs non-interactive runs
-  - host application context (Terminal, VS Code, etc.)
-  - GUI prompt availability
-  - accessible vs restricted system locations
-- Explains why certain actions are skipped for safety
-- Integrated into full scan and available as `permissions-only` mode
-- Inspection-only; never performs cleanup actions
-- Supports `--explain`
+```text
+[2026-01-02 14:14:33] Caches: scanned 88 directories; found 2 >= 200MB.
 
-### Architecture reporting
+CACHE GROUP: Google
+CACHE? 1799MB | modified: 2025-02-03 13:13:57 | owner: Google
+  path: ~/Library/Caches/Google
+  Subfolders (top 3 by size):
+    - 1799MB | Chrome
+
+CACHE GROUP: Homebrew
+CACHE? 438MB | modified: 2026-01-02 12:27:04 | owner: Homebrew
+  path: ~/Library/Caches/Homebrew
+  Subfolders (top 3 by size):
+    - 366MB | downloads
+    - 46MB  | api
+    - 13MB  | bootsnap
+
+Caches: total large caches (by heuristics): 3356MB
+```
+
+#### v1.0.0
+
+**Launchd hygiene**
+
+- Scans:
+  - `/Library/LaunchAgents`
+  - `/Library/LaunchDaemons`
+  - `~/Library/LaunchAgents`
+- Detects **suspected orphaned or unmanaged** launchd plists by:
+  - skipping active `launchctl` jobs
+  - skipping known installed apps
+  - skipping Homebrew-managed services
+  - skipping known security and endpoint software
+- Uses inventory-based installed app and bundle-id resolution
+- Prompts before every action
+- Moves files to a **timestamped backup folder** on your Desktop
+- Supports `--explain` flag to provide detailed reasoning per item
+
+**/usr/local/bin inspection**
+
+(corresponds to `--mode bins-only`)
+
+- Optionally inspects `/usr/local/bin` for legacy or unmanaged binaries
+- Conservative and heuristic-based by design
+- Supports `--explain` flag to clarify detection logic
+- Uses inventory-backed Homebrew and installed-software correlation
+
+**Architecture reporting**
 
 - Generates a report of **Intel-only executables (no arm64 slice)** at:
   - `~/Desktop/intel_binaries.txt`
@@ -429,6 +469,7 @@ Follow this flow to stay safe and avoid surprises.
 mc-leaner/
 ├── mc-leaner.sh
 ├── modules/
+│   ├── inventory.sh      # inventory core (apps, bundle IDs, Homebrew, index)
 │   ├── launchd.sh        # launchd plist inspection (agents & daemons)
 │   ├── bins_usr_local.sh # /usr/local/bin inspection for unmanaged binaries
 │   ├── intel.sh          # Intel-only executable reporting (informational)

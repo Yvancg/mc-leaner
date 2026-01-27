@@ -37,11 +37,12 @@ If you want to understand what is happening on your system and clean it safely, 
 
 ---
 
-## What mc-leaner does (v2.1.0)
+## What mc-leaner does (v2.2.0)
 
 mc-leaner inspects macOS systems for:
 
 - Startup and login items (launchd agents, daemons, login items)
+Startup inspection does not disable anything.
 - Orphaned or unmanaged launchd plists
 - Large caches and logs
 - Leftover data from uninstalled applications

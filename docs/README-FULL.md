@@ -62,7 +62,24 @@ If you want to understand what is running on your system—and clean it safely�
 
 ## What mc-leaner does (current)
 
+
 As of v2.1.0, all modules follow a strict inspection-first contract, share a unified inventory core, and produce explicit, reviewable run summaries.
+
+### v2.2.0 — Startup impact & performance attribution
+
+This release builds on the v2.1.x inspection foundation by adding attribution and performance context, without changing any cleanup behavior.
+
+- Startup inspection now estimates relative impact per item (low, medium, high)
+- Run summary includes boot vs login flagged counts and a conservative startup risk signal
+- End-of-run timing includes per-module durations (startup, launchd, caches, logs, disk, leftovers)
+- No behavior changes: inspection-only, no disabling, unloading, or removal
+
+### v2.2.0 highlights — Startup impact & performance attribution
+
+- Startup inspection now estimates impact per item (low, medium, high)
+- Run summary includes boot vs login flagged counts and a conservative startup risk signal
+- End-of-run timing now includes per-module durations (startup, launchd, caches, logs, disk, leftovers)
+- No behavior changes: inspection only, no disabling or unloading
 
 ### Inventory core (v2.0.0 – contract)
 
@@ -85,8 +102,14 @@ As of v2.1.0, all modules follow a strict inspection-first contract, share a uni
   - owner (Apple system, installed app, unknown)
 - Uses inventory to resolve known apps and bundle identifiers
 - Flags unknown or unmanaged startup items for review
-- Inspection-only; no cleanup actions are performed
+- Inspection-only; startup inspection never modifies system behavior
 - Fully explainable with --explain
+
+**v2.2.0 additions:**
+
+- Estimated startup impact classification (low, medium, high)
+- Aggregated boot vs login counts in the run summary
+- Conservative startup risk hint when boot-time items may slow startup
 
 ### Disk inspection (v2.1.0)
 
@@ -262,7 +285,7 @@ Every action requires user confirmation.
 
 ### Flagged item transparency (v2.1.0)
 
-For every module that can flag items, mc-leaner now provides:
+As of v2.1.0, mc-leaner now provides:
 
 - Explicit lists of all flagged items in the end-of-run summary
 - One item per line, grouped by module
@@ -275,6 +298,11 @@ This ensures you can always answer:
 - *In which execution mode?*
 
 Counts are no longer detached from the underlying items.
+
+### Timing attribution (v2.2.0)
+
+- Per-module wall-clock durations are included in the run summary
+- Helps attribute slow runs to specific inspection phases
 
 1. **Dry-run by default**  
    Nothing is moved unless you explicitly use `--apply`.
@@ -409,6 +437,7 @@ mc-leaner/
 │   ├── leftovers.sh      # app leftovers inspection (implemented)
 │   ├── logs.sh           # log inspection (implemented)
 │   ├── startup.sh        # startup and login item inspection (inspection-only)
+│   ├── disk.sh           # disk usage attribution (inspection-only)
 │   └── permissions.sh    # execution context & permission inspection
 ├── lib/
 │   ├── cli.sh

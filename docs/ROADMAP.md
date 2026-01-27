@@ -213,6 +213,34 @@ This release strengthens mc-leaner’s inspection guarantees by making all flagg
 
 Status: **released**
 
+## v2.2.0 (released)
+
+Focus: **startup impact & performance attribution**
+
+This release deepens startup inspection by answering why a system may feel slow at boot or login, without introducing any cleanup or disabling behavior.
+
+### Startup inspection enhancements
+
+- Impact classification per startup item:
+  - low | medium | high
+- Heuristics based on:
+  - boot vs login timing
+  - system vs user scope
+  - known heavy agents (security, sync, virtualization)
+  - unknown owner outside system locations
+- Aggregated startup summary:
+  - boot vs login flagged counts
+  - conservative estimated startup risk indicator
+- Best-effort startup timing attribution included in run summary
+- Explicit guarantee: startup inspection never modifies system behavior
+
+### Cross-module alignment
+
+- Startup module fully aligned with the locked inspection-only module contract
+- Timing output standardized for inclusion in end-of-run summaries
+
+Status: **released**
+
 ---
 
 ## v2.x (medium term)

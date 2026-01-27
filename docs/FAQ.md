@@ -10,7 +10,7 @@ mc-leaner is **safe by default**:
 - It never deletes files
 - All changes are reversible via a backup folder
 - Security and endpoint protection software is always skipped
-- All modules in v2.1.0 follow an inspection-first contract with explicit user confirmation for any changes
+- All modules in v2.2.0 follow an inspection-first contract with explicit user confirmation for any changes
 
 That said, mc-leaner is a **power tool**. You are expected to read prompts and understand what you approve.
 
@@ -69,7 +69,7 @@ mc-leaner flags items for **review**, not removal. If you still use an app, keep
 
 ## Why does the run summary list every flagged item?
 
-As of v2.1.0, mc-leaner always lists the identifiers of all flagged items in the end-of-run summary.
+As of v2.2.0, mc-leaner always lists the identifiers of all flagged items in the end-of-run summary.
 
 This is intentional.
 
@@ -104,6 +104,8 @@ If you use `--apply`, mc-leaner will:
 - never delete anything
 
 This allows you to safely reclaim space without guessing.
+
+The Caches module accepts `--explain` and inventory context like other inspection modules.
 
 ---
 
@@ -232,11 +234,12 @@ All decisions are explicit and reversible.
 
 ## What does the Startup module do?
 
-The Startup module is introduced in v2.1.0.
+The Startup module is introduced in v2.2.0.
 
 It inspects startup-related execution paths including LaunchAgents, LaunchDaemons, and Login Items.
 
 The module is inspection-first and does not disable, unload, or remove anything automatically.
+It never modifies startup behavior.
 
 It reports:
 

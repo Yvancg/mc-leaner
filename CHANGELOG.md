@@ -10,6 +10,32 @@ This project follows a pragmatic versioning scheme:
 
 ---
 
+# 
+# ## v2.2.0 — Startup impact analysis, timing fixes, and module contract alignment
+
+**Release date:** 2026-01-27
+
+### Added
+
+- Startup impact scoring
+  - Classifies flagged startup items by estimated impact (low, medium, high)
+  - Surfaces an overall startup risk signal in the run summary
+
+- Consistent module contracts
+  - Caches module now accepts `--explain` and inventory index arguments like other inspection modules
+  - All flag-capable modules export newline-delimited `*_FLAGGED_IDS_LIST` consistently
+
+### Changed
+
+- Run summary
+  - Deterministic ordering and formatting across all modules
+  - Improved timing attribution per module and total runtime
+
+### Fixed
+
+- Timing arithmetic errors under strict shell settings
+- Argument mismatches between CLI dispatcher and module entrypoints
+
 ## v2.1.0 — Disk inspection, flagged IDs export and run summary improvements
 
 **Release date:** 2026-01-26

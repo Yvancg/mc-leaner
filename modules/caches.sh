@@ -35,6 +35,7 @@ run_caches_module() {
   : "${mode}" "${backup_dir}" "${inventory_index_file}"
 
   # Explain flag used throughout via EXPLAIN.
+  local _caches_prev_explain="${EXPLAIN:-false}"
   EXPLAIN="${explain}"
 
   # Timing (best-effort wall clock duration for this module).
@@ -49,7 +50,11 @@ run_caches_module() {
       CACHES_DUR_S=$((_caches_t1 - _caches_t0))
     fi
   }
-  trap _caches_finish_timing RETURN
+  _caches_on_return() {
+    EXPLAIN="${_caches_prev_explain:-false}"
+    _caches_finish_timing
+  }
+  trap _caches_on_return RETURN
 
   # ----------------------------
   # Helper: _inventory_ready (moved before first use)
@@ -504,7 +509,7 @@ run_caches_module() {
   CACHES_FLAGGED_IDS_LIST="$(printf '%s\n' "${flagged_ids[@]}")"
 
   # Ensure timing is computed before returning from the module.
-  _caches_finish_timing
+  _caches_on_return
 
   summary_add "Caches flagged=${flagged_count} total_mb=${overall_total_mb} moved=${moved_count} failures=${#move_failures[@]} scanned=${scanned_dirs} (threshold=${min_mb}MB)"
 }

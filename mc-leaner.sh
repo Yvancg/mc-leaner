@@ -280,7 +280,7 @@ case "$MODE" in
     # Prefer inventory index lookups; keep known_apps_file as a legacy fallback input.
     ensure_known_apps
     run_launchd_module "scan" "false" "$BACKUP_DIR" "$inventory_index_file" "$known_apps_file"
-    summary_add "launchd: inspected"
+    summary_add "launchd: inspected (flagged=${LAUNCHD_FLAGGED_COUNT:-0})"
     if [[ "${LAUNCHD_FLAGGED_COUNT:-0}" -gt 0 && -n "${LAUNCHD_FLAGGED_IDS_LIST:-}" ]]; then
       _summary_add_list "launchd" "${LAUNCHD_FLAGGED_IDS_LIST}" 50
     fi
@@ -290,12 +290,12 @@ case "$MODE" in
 
     # Use inventory index to label cache owners more accurately.
     run_caches_module "scan" "false" "$BACKUP_DIR" "$EXPLAIN" "$inventory_index_file"
-    summary_add "caches: inspected"
+    summary_add "caches: inspected (flagged=${CACHES_FLAGGED_COUNT:-0})"
     if [[ "${CACHES_FLAGGED_COUNT:-0}" -gt 0 && -n "${CACHES_FLAGGED_IDS_LIST:-}" ]]; then
       _summary_add_list "caches" "${CACHES_FLAGGED_IDS_LIST}" 50
     fi
     run_logs_module "false" "$BACKUP_DIR" "$EXPLAIN" "50"
-    summary_add "logs: inspected (threshold=50MB)"
+    summary_add "logs: inspected (flagged=${LOGS_FLAGGED_COUNT:-0} threshold=50MB)"
     if [[ "${LOGS_FLAGGED_COUNT:-0}" -gt 0 && -n "${LOGS_FLAGGED_IDS_LIST:-}" ]]; then
       _summary_add_list "logs" "${LOGS_FLAGGED_IDS_LIST}" 50
     fi
@@ -324,7 +324,7 @@ case "$MODE" in
     fi
     ensure_installed_bundle_ids
     run_leftovers_module "false" "$BACKUP_DIR" "$EXPLAIN" "$installed_bundle_ids_file"
-    summary_add "leftovers: inspected (threshold=50MB)"
+    summary_add "leftovers: inspected (flagged=${LEFTOVERS_FLAGGED_COUNT:-0} threshold=50MB)"
     if [[ "${LEFTOVERS_FLAGGED_COUNT:-0}" -gt 0 && -n "${LEFTOVERS_FLAGGED_IDS_LIST:-}" ]]; then
       _summary_add_list "leftovers" "${LEFTOVERS_FLAGGED_IDS_LIST}" 50
     fi
@@ -341,7 +341,7 @@ case "$MODE" in
 
     ensure_known_apps
     run_launchd_module "clean" "true" "$BACKUP_DIR" "$inventory_index_file" "$known_apps_file"
-    summary_add "launchd: cleaned"
+    summary_add "launchd: cleaned (flagged=${LAUNCHD_FLAGGED_COUNT:-0})"
     if [[ "${LAUNCHD_FLAGGED_COUNT:-0}" -gt 0 && -n "${LAUNCHD_FLAGGED_IDS_LIST:-}" ]]; then
       _summary_add_list "launchd" "${LAUNCHD_FLAGGED_IDS_LIST}" 50
     fi
@@ -350,12 +350,12 @@ case "$MODE" in
     summary_add "bins: cleaned"
 
     run_caches_module "clean" "true" "$BACKUP_DIR" "$EXPLAIN" "$inventory_index_file"
-    summary_add "caches: cleaned"
+    summary_add "caches: cleaned (flagged=${CACHES_FLAGGED_COUNT:-0})"
     if [[ "${CACHES_FLAGGED_COUNT:-0}" -gt 0 && -n "${CACHES_FLAGGED_IDS_LIST:-}" ]]; then
       _summary_add_list "caches" "${CACHES_FLAGGED_IDS_LIST}" 50
     fi
     run_logs_module "true" "$BACKUP_DIR" "$EXPLAIN" "50"
-    summary_add "logs: cleaned (threshold=50MB)"
+    summary_add "logs: cleaned (flagged=${LOGS_FLAGGED_COUNT:-0} threshold=50MB)"
     if [[ "${LOGS_FLAGGED_COUNT:-0}" -gt 0 && -n "${LOGS_FLAGGED_IDS_LIST:-}" ]]; then
       _summary_add_list "logs" "${LOGS_FLAGGED_IDS_LIST}" 50
     fi
@@ -384,7 +384,7 @@ case "$MODE" in
     fi
     ensure_installed_bundle_ids
     run_leftovers_module "true" "$BACKUP_DIR" "$EXPLAIN" "$installed_bundle_ids_file"
-    summary_add "leftovers: cleaned (threshold=50MB)"
+    summary_add "leftovers: cleaned (flagged=${LEFTOVERS_FLAGGED_COUNT:-0} threshold=50MB)"
     if [[ "${LEFTOVERS_FLAGGED_COUNT:-0}" -gt 0 && -n "${LEFTOVERS_FLAGGED_IDS_LIST:-}" ]]; then
       _summary_add_list "leftovers" "${LEFTOVERS_FLAGGED_IDS_LIST}" 50
     fi
@@ -395,10 +395,10 @@ case "$MODE" in
     ensure_installed_bundle_ids
     if [[ "$APPLY" != "true" ]]; then
       run_leftovers_module "false" "$BACKUP_DIR" "$EXPLAIN" "$installed_bundle_ids_file"
-      summary_add "leftovers: inspected (threshold=50MB)"
+      summary_add "leftovers: inspected (flagged=${LEFTOVERS_FLAGGED_COUNT:-0} threshold=50MB)"
     else
       run_leftovers_module "true" "$BACKUP_DIR" "$EXPLAIN" "$installed_bundle_ids_file"
-      summary_add "leftovers: cleaned (threshold=50MB)"
+      summary_add "leftovers: cleaned (flagged=${LEFTOVERS_FLAGGED_COUNT:-0} threshold=50MB)"
     fi
     if [[ "${LEFTOVERS_FLAGGED_COUNT:-0}" -gt 0 && -n "${LEFTOVERS_FLAGGED_IDS_LIST:-}" ]]; then
       _summary_add_list "leftovers" "${LEFTOVERS_FLAGGED_IDS_LIST}" 50
@@ -413,10 +413,10 @@ case "$MODE" in
     ensure_known_apps
     if [[ "$APPLY" != "true" ]]; then
       run_launchd_module "scan" "false" "$BACKUP_DIR" "$inventory_index_file" "$known_apps_file"
-      summary_add "launchd: inspected"
+      summary_add "launchd: inspected (flagged=${LAUNCHD_FLAGGED_COUNT:-0})"
     else
       run_launchd_module "clean" "true" "$BACKUP_DIR" "$inventory_index_file" "$known_apps_file"
-      summary_add "launchd: cleaned"
+      summary_add "launchd: cleaned (flagged=${LAUNCHD_FLAGGED_COUNT:-0})"
     fi
     if [[ "${LAUNCHD_FLAGGED_COUNT:-0}" -gt 0 && -n "${LAUNCHD_FLAGGED_IDS_LIST:-}" ]]; then
       _summary_add_list "launchd" "${LAUNCHD_FLAGGED_IDS_LIST}" 50
@@ -437,11 +437,11 @@ case "$MODE" in
     if [[ "$APPLY" != "true" ]]; then
       ensure_inventory
       run_caches_module "scan" "false" "$BACKUP_DIR" "$EXPLAIN" "$inventory_index_file"
-      summary_add "caches: inspected"
+      summary_add "caches: inspected (flagged=${CACHES_FLAGGED_COUNT:-0})"
     else
       ensure_inventory
       run_caches_module "clean" "true" "$BACKUP_DIR" "$EXPLAIN" "$inventory_index_file"
-      summary_add "caches: cleaned"
+      summary_add "caches: cleaned (flagged=${CACHES_FLAGGED_COUNT:-0})"
     fi
     if [[ "${CACHES_FLAGGED_COUNT:-0}" -gt 0 && -n "${CACHES_FLAGGED_IDS_LIST:-}" ]]; then
       _summary_add_list "caches" "${CACHES_FLAGGED_IDS_LIST}" 50
@@ -450,10 +450,10 @@ case "$MODE" in
   logs-only)
     if [[ "$APPLY" != "true" ]]; then
       run_logs_module "false" "$BACKUP_DIR" "$EXPLAIN" "50"
-      summary_add "logs: inspected (threshold=50MB)"
+      summary_add "logs: inspected (flagged=${LOGS_FLAGGED_COUNT:-0} threshold=50MB)"
     else
       run_logs_module "true" "$BACKUP_DIR" "$EXPLAIN" "50"
-      summary_add "logs: cleaned (threshold=50MB)"
+      summary_add "logs: cleaned (flagged=${LOGS_FLAGGED_COUNT:-0} threshold=50MB)"
     fi
     if [[ "${LOGS_FLAGGED_COUNT:-0}" -gt 0 && -n "${LOGS_FLAGGED_IDS_LIST:-}" ]]; then
       _summary_add_list "logs" "${LOGS_FLAGGED_IDS_LIST}" 50

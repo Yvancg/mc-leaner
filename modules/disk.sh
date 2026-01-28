@@ -15,6 +15,7 @@
 #       - DISK_DUR_S        (int) : best-effort wall clock duration in seconds for this module
 #       - DISK_THRESHOLD_MB  (int) : threshold used for flagging (MB)
 #       - DISK_TOP_N         (int) : maximum items emitted
+#       - DISK_FLAGGED_RECORDS_LIST (nl) : newline-delimited flagged records for correlation (printed items only)
 #   - Entry point signature:
 #       run_disk_module <mode> <apply> <backup_dir> <explain> [inventory_index_file]
 #   - Inputs:
@@ -104,6 +105,22 @@ _disk_kb_to_mb_round() {
   # Purpose: Convert integer KB to integer MB (rounded).
   local kb="${1:-0}"
   awk -v kb="$kb" 'BEGIN{ if(kb<=0){print 0; exit} printf("%d", int((kb/1024)+0.5)) }'
+}
+
+_disk_mb_to_human() {
+  # Purpose: Convert integer MB to a compact human string (MB or GB).
+  # Safety: formatting only.
+  local mb="${1:-0}"
+  if [[ -z "$mb" ]]; then
+    echo "-"
+    return 0
+  fi
+
+  if (( mb >= 1024 )); then
+    awk -v mb="$mb" 'BEGIN{ printf("%.1fGB", mb/1024.0) }'
+  else
+    printf '%sMB' "$mb"
+  fi
 }
 
 _disk_normalize() {
@@ -337,6 +354,9 @@ run_disk_module() {
   DISK_THRESHOLD_MB="${min_mb}"
   DISK_TOP_N="${top_n}"
 
+  # Newline-delimited flagged records for v2.3.0 correlation (printed items only).
+  DISK_FLAGGED_RECORDS_LIST=""
+
   local tmp
   tmp="$(mktemp -t mcleaner_disk.XXXXXX 2>/dev/null)" || {
     log_info "Disk: ERROR: failed to create temp file"
@@ -381,6 +401,13 @@ run_disk_module() {
       cat="$(_disk_category_for_path "${p}")"
 
       _disk_emit_item "${mb}" "${owner}" "${conf}" "${cat}" "${p}"
+
+      local size_h size_bytes
+      size_h="$(_disk_mb_to_human "${mb}")"
+      size_bytes=$((mb * 1024 * 1024))
+
+      DISK_FLAGGED_RECORDS_LIST+="path=${p} | size_bytes=${size_bytes} | size_h=${size_h} | owner=${owner}"$'\n'
+
       printed=$((printed + 1))
     fi
   done < <(LC_ALL=C sort -rn -k1,1 "${tmp}" 2>/dev/null)
@@ -393,6 +420,8 @@ run_disk_module() {
 
   # Export flagged identifiers list for run summary consumption.
   DISK_FLAGGED_IDS_LIST="$(printf '%s\n' "${_disk_flagged_ids[@]}")"
+
+  DISK_FLAGGED_RECORDS_LIST="$(printf '%s' "${DISK_FLAGGED_RECORDS_LIST}" | sed '$s/\n$//')"
 
   _disk_t1="$(/bin/date +%s 2>/dev/null || echo '')"
   if [[ -n "${_disk_t0}" && -n "${_disk_t1}" ]]; then

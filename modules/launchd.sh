@@ -22,6 +22,21 @@ if ! type explain_log >/dev/null 2>&1; then
   }
 fi
 
+if ! type service_emit_record >/dev/null 2>&1; then
+  service_emit_record() {
+    # Purpose: Best-effort SERVICE? output when shared helpers are not loaded.
+    # Safety: Logging only; does not change scan scope or cleanup behavior.
+    local scope="${1:-}"
+    local persistence="${2:-}"
+    local owner="${3:-Unknown}"
+    local label="${4:-}"
+    local network_facing="false"
+
+    [[ -n "$scope" && -n "$persistence" && -n "$label" ]] || return 0
+    log "SERVICE? scope=${scope} | persistence=${persistence} | owner=${owner:-Unknown} | network_facing=${network_facing} | label=${label}"
+  }
+fi
+
 # ----------------------------
 # Defensive Checks
 # ----------------------------
@@ -168,6 +183,61 @@ run_launchd_module() {
     grep -qxF "$k" "${inventory_keys_file}" 2>/dev/null
   }
 
+  _inventory_index_name_for_key() {
+    # Purpose: Return inventory name (column 2) for a given key (column 1).
+    # Expected format: key<TAB>name<TAB>source<TAB>path
+    # Safety: Read-only.
+    local k="$1"
+    [[ -n "$k" && -n "${inventory_index_file:-}" && -f "${inventory_index_file:-}" ]] || return 1
+
+    # First match wins (inventory index is de-duplicated by key in practice).
+    /usr/bin/awk -F '\t' -v key="$k" '$1==key{print $2; exit}' "${inventory_index_file}" 2>/dev/null
+  }
+
+  _launchd_inventory_owner() {
+    # Purpose: Infer an owner string for a launchd label using the inventory index.
+    # Strategy (conservative):
+    #  - exact key match
+    #  - normalized full label key match
+    #  - normalized last label component match
+    # Safety: Read-only; no guesses beyond inventory-backed matches.
+    local label="$1"
+
+    [[ -n "$label" ]] || { echo "Unknown"; return 0; }
+    [[ -n "${inventory_index_file:-}" && -f "${inventory_index_file:-}" ]] || { echo "Unknown"; return 0; }
+
+    local name=""
+
+    name="$(_inventory_index_name_for_key "$label" || true)"
+    if [[ -n "$name" ]]; then
+      echo "$name"
+      return 0
+    fi
+
+    local n_full
+    n_full="$(_launchd_norm_key "$label")"
+    if [[ -n "$n_full" ]]; then
+      name="$(_inventory_index_name_for_key "$n_full" || true)"
+      if [[ -n "$name" ]]; then
+        echo "$name"
+        return 0
+      fi
+    fi
+
+    local last="${label##*.}"
+    local n_last
+    n_last="$(_launchd_norm_key "$last")"
+    if [[ -n "$n_last" ]]; then
+      name="$(_inventory_index_name_for_key "$n_last" || true)"
+      if [[ -n "$name" ]]; then
+        echo "$name"
+        return 0
+      fi
+    fi
+
+    echo "Unknown"
+  }
+
   _launchd_label_matches_inventory() {
     # Purpose: reduce false positives by skipping launchd labels that map to installed software
     # Strategy (conservative):
@@ -247,6 +317,37 @@ run_launchd_module() {
         label="$(defaults read "$plist_path" Label 2>/dev/null || true)"
       fi
       [[ -n "${label:-}" ]] || continue
+
+      local scope
+      local persistence
+      local owner
+
+      case "$dir" in
+        '/Library/LaunchAgents')
+          scope="system"
+          persistence="login"
+          ;;
+        '/Library/LaunchDaemons')
+          scope="system"
+          persistence="boot"
+          ;;
+        "$HOME"/Library/LaunchAgents)
+          scope="user"
+          persistence="login"
+          ;;
+        "$HOME"/Library/LaunchDaemons)
+          scope="user"
+          persistence="boot"
+          ;;
+        *)
+          scope="user"
+          persistence="login"
+          ;;
+      esac
+
+      owner="$(_launchd_inventory_owner "$label")"
+
+      service_emit_record "$scope" "$persistence" "$owner" "$label"
 
       checked=$((checked + 1))
 

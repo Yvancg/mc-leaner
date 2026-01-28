@@ -45,6 +45,7 @@ Use clear section dividers:
 ```
 
 Rules:
+
 - Use dashed separators
 - Title case
 - One blank line before and after

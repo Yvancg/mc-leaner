@@ -56,6 +56,240 @@ tmpfile() {
 }
 
 # ----------------------------
+# Background services (v2.3.0 contract)
+# ----------------------------
+# Purpose: provide a stable, grep-friendly record format for persistent services.
+# Safety: logging only; does not inspect network traffic, sockets, or runtime state.
+# Notes: network_facing is locked to false for now (heuristics added later).
+
+PRIVACY_TOTAL_SERVICES=0
+PRIVACY_UNKNOWN_SERVICES=0
+PRIVACY_NETWORK_FACING_SERVICES=0
+
+# Newline-delimited SERVICE? records for cross-module correlation (v2.3.0 step 3).
+# Format: scope=... | persistence=... | owner=... | label=...
+SERVICE_RECORDS_LIST=""
+
+# ----------------------------
+# Network-facing heuristics (v2.3.0, static)
+# ----------------------------
+# Purpose: classify likely network-facing background services using static signals.
+# Safety: no traffic inspection, no socket enumeration, no runtime probing.
+# Policy: default false; only mark true on explicit matches.
+
+# Rule IDs (stable):
+# - NF_VPN_OWNER
+# - NF_CLOUD_STORAGE_OWNER
+# - NF_SYNC_CLIENT_OWNER
+# - NF_TELEMETRY_UPDATE_OWNER
+# - NF_REMOTE_ACCESS_OWNER
+# - NF_LABEL_ALLOWLIST
+
+_service_normalize() {
+  # Purpose: normalize for conservative matching (lowercase, strip spaces/punct).
+  echo "${1:-}" | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:]'
+}
+
+_service_owner_in_list() {
+  # Usage: _service_owner_in_list <owner> <list...>
+  local owner_raw="${1:-}"
+  shift || true
+
+  local owner_norm
+  owner_norm="$(_service_normalize "$owner_raw")"
+  [[ -n "$owner_norm" ]] || return 1
+
+  local x
+  for x in "$@"; do
+    [[ "$owner_norm" == "$(_service_normalize "$x")" ]] && return 0
+  done
+  return 1
+}
+
+_service_label_in_list() {
+  # Usage: _service_label_in_list <label> <list...>
+  local label="${1:-}"
+  shift || true
+  [[ -n "$label" ]] || return 1
+
+  local x
+  for x in "$@"; do
+    [[ "$label" == "$x" ]] && return 0
+  done
+  return 1
+}
+
+# Conservative vendor lists (explicit only). Update intentionally.
+NF_VPN_OWNERS=(
+  "Tailscale"
+  "NordVPN"
+  "ExpressVPN"
+  "ProtonVPN"
+  "Surfshark"
+  "Mullvad"
+  "Cloudflare WARP"
+)
+
+NF_CLOUD_STORAGE_OWNERS=(
+  "Dropbox"
+  "Google Drive"
+  "OneDrive"
+  "Box"
+  "MEGA"
+  "Nextcloud"
+)
+
+NF_SYNC_CLIENT_OWNERS=(
+  "Google"
+  "Microsoft"
+  "Mozilla"
+)
+
+NF_TELEMETRY_UPDATE_OWNERS=(
+  "Google"
+  "Microsoft"
+  "Adobe"
+  "Dropbox"
+  "Zoom"
+)
+
+NF_REMOTE_ACCESS_OWNERS=(
+  "TeamViewer"
+  "AnyDesk"
+  "LogMeIn"
+  "Splashtop"
+  "Chrome Remote Desktop"
+)
+
+# Exact label allowlist for known network-facing services.
+# Keep this list small and explicit.
+NF_LABEL_ALLOWLIST=(
+  "us.zoom.updater.login.check"
+  "us.zoom.updater"
+  "us.zoom.ZoomDaemon"
+  "com.dropbox.DropboxUpdater.wake"
+  "com.dropbox.dropboxmacupdate.xpcservice"
+  "com.dropbox.dropboxmacupdate.agent"
+  "com.google.keystone.xpcservice"
+  "com.google.keystone.agent"
+  "com.google.keystone.daemon"
+  "com.google.GoogleUpdater.wake.system"
+)
+
+service_network_facing_classify() {
+  # Contract:
+  #   service_network_facing_classify <owner> <label>
+  # Output (tab-delimited):
+  #   <true|false>\t<rule_id|->\t<reason|->
+  #
+  # Policy:
+  # - Default false.
+  # - Apply owner-class rules only when owner is known (not Unknown).
+  # - Apply label allowlist regardless of owner.
+  local owner="${1:-Unknown}"
+  local label="${2:-}"
+
+  if _service_label_in_list "$label" "${NF_LABEL_ALLOWLIST[@]:-}"; then
+    printf 'true\tNF_LABEL_ALLOWLIST\tlabel_allowlist_match'
+    return 0
+  fi
+
+  if [[ -z "$owner" || "$owner" == "Unknown" ]]; then
+    printf 'false\t-\t-'
+    return 0
+  fi
+
+  if _service_owner_in_list "$owner" "${NF_VPN_OWNERS[@]:-}"; then
+    printf 'true\tNF_VPN_OWNER\tvpn_vendor_match'
+    return 0
+  fi
+  if _service_owner_in_list "$owner" "${NF_CLOUD_STORAGE_OWNERS[@]:-}"; then
+    printf 'true\tNF_CLOUD_STORAGE_OWNER\tcloud_storage_vendor_match'
+    return 0
+  fi
+
+  if _service_owner_in_list "$owner" "${NF_SYNC_CLIENT_OWNERS[@]:-}"; then
+    printf 'true\tNF_SYNC_CLIENT_OWNER\tsync_client_vendor_match'
+    return 0
+  fi
+
+  if _service_owner_in_list "$owner" "${NF_TELEMETRY_UPDATE_OWNERS[@]:-}"; then
+    printf 'true\tNF_TELEMETRY_UPDATE_OWNER\ttelemetry_update_vendor_match'
+    return 0
+  fi
+
+  if _service_owner_in_list "$owner" "${NF_REMOTE_ACCESS_OWNERS[@]:-}"; then
+    printf 'true\tNF_REMOTE_ACCESS_OWNER\tremote_access_vendor_match'
+    return 0
+  fi
+
+  printf 'false\t-\t-'
+}
+
+privacy_reset_counters() {
+  # Purpose: reset per-run privacy counters.
+  # Safety: state only.
+  PRIVACY_TOTAL_SERVICES=0
+  PRIVACY_UNKNOWN_SERVICES=0
+  PRIVACY_NETWORK_FACING_SERVICES=0
+  SERVICE_RECORDS_LIST=""
+}
+
+service_emit_record() {
+  # Contract:
+  #   service_emit_record <scope> <persistence> <owner> <label> [network_facing]
+  #
+  # Output format (single line):
+  #   SERVICE? scope=<system|user> | persistence=<boot|login|on-demand> | owner=<OwnerName|Unknown> | network_facing=<true|false> | label=<...>
+  #
+  # Safety: logging only.
+  local scope="${1:-}"
+  local persistence="${2:-}"
+  local owner="${3:-Unknown}"
+  local label="${4:-}"
+  local network_facing="${5:-false}"
+
+  # Fail-closed: do not emit malformed records.
+  if [[ -z "$scope" || -z "$persistence" || -z "$label" ]]; then
+    explain_log "service_emit_record: skip (missing fields) scope='$scope' persistence='$persistence' label='$label'"
+    return 0
+  fi
+
+  PRIVACY_TOTAL_SERVICES=$((PRIVACY_TOTAL_SERVICES + 1))
+  if [[ "$owner" == "Unknown" || -z "$owner" ]]; then
+    PRIVACY_UNKNOWN_SERVICES=$((PRIVACY_UNKNOWN_SERVICES + 1))
+    owner="Unknown"
+  fi
+
+  # Static network-facing classification (conservative; explicit matches only).
+  local nf_out="" nf="false" nf_rule="-" nf_reason="-"
+  nf_out="$(service_network_facing_classify "$owner" "$label")"
+  nf="${nf_out%%$'\t'*}"
+  nf_rule="${nf_out#*$'\t'}"; nf_rule="${nf_rule%%$'\t'*}"
+  nf_reason="${nf_out##*$'\t'}"
+
+  network_facing="$nf"
+  if [[ "$network_facing" == "true" ]]; then
+    PRIVACY_NETWORK_FACING_SERVICES=$((PRIVACY_NETWORK_FACING_SERVICES + 1))
+    explain_log "network_facing=true because ${nf_rule}: owner=${owner} reason=${nf_reason} label=${label}"
+  fi
+
+  log "SERVICE? scope=${scope} | persistence=${persistence} | owner=${owner} | network_facing=${network_facing} | label=${label}"
+  
+  # Keep a structured copy for correlation (logging remains the source of truth).
+  SERVICE_RECORDS_LIST+="scope=${scope} | persistence=${persistence} | owner=${owner} | label=${label}"$'\n'
+}
+
+privacy_summary_line() {
+  # Purpose: emit a stable, parseable privacy summary line for end-of-run summary.
+  # Safety: logging only.
+  printf 'privacy: total_services=%s unknown_services=%s network_facing=%s' \
+    "${PRIVACY_TOTAL_SERVICES}" \
+    "${PRIVACY_UNKNOWN_SERVICES}" \
+    "${PRIVACY_NETWORK_FACING_SERVICES}"
+}
+
+# ----------------------------
 # Run summary (collector)
 # ----------------------------
 # Purpose: allow modules to register end-of-run summary lines; printed once by the entrypoint
@@ -149,6 +383,13 @@ summary_print() {
 
   log "RUN SUMMARY:"
 
+  if [ "${PRIVACY_TOTAL_SERVICES:-0}" -gt 0 ]; then
+    log "  - $(privacy_summary_line)"
+  fi
+  if [ "${PRIVACY_NETWORK_FACING_SERVICES:-0}" -gt 0 ] && [ "${PRIVACY_UNKNOWN_SERVICES:-0}" -gt 0 ]; then
+    log "  - risk: background_services_with_network_access"
+  fi
+
   local line
 
   if [ "$module_count" -gt 0 ]; then
@@ -180,5 +421,7 @@ summary_print() {
     done
   fi
 }
+
+privacy_reset_counters
 
 # End of library

@@ -264,6 +264,66 @@ _summary_add_list() {
   fi
 }
 
+# ----------------------------
+# Insights (v2.3.0)
+# ----------------------------
+# Purpose: correlate already-flagged disk consumers with persistent background services.
+# Safety: logging only; no new scans; no recommendations.
+
+_insight_log() {
+  log "INSIGHT: $*"
+}
+
+_extract_service_owner_persistence_map() {
+  # Input: SERVICE_RECORDS_LIST (lines: scope=... | persistence=... | owner=... | label=...)
+  # Output: lines "owner\tpersistence" (may include duplicates)
+  local line owner persistence
+
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+
+    owner="$(printf '%s' "$line" | sed -n 's/.*| owner=\([^|]*\) |.*/\1/p' | sed 's/^ *//;s/ *$//')"
+    persistence="$(printf '%s' "$line" | sed -n 's/.*persistence=\([^|]*\) |.*/\1/p' | sed 's/^ *//;s/ *$//')"
+
+    [[ -n "$owner" && -n "$persistence" ]] || continue
+    printf '%s\t%s\n' "$owner" "$persistence"
+  done <<<"${SERVICE_RECORDS_LIST:-}"
+}
+
+_emit_disk_service_insights() {
+  # Purpose: emit one-line insights when a flagged disk owner also appears as a persistent service owner.
+  # Constraints:
+  # - Only flagged disk items (DISK_FLAGGED_RECORDS_LIST)
+  # - Only inventory-backed owners (skip Unknown)
+  # - One persistence per owner (first seen)
+  local svc_map disk_line owner persistence size_h
+
+  [[ -n "${DISK_FLAGGED_RECORDS_LIST:-}" ]] || return 0
+  [[ -n "${SERVICE_RECORDS_LIST:-}" ]] || return 0
+
+  # owner -> first-seen persistence
+  svc_map="$(_extract_service_owner_persistence_map | /usr/bin/awk -F '\t' '!seen[$1]++{print $1"\t"$2}')"
+  [[ -n "$svc_map" ]] || return 0
+
+  while IFS= read -r disk_line; do
+    [[ -n "$disk_line" ]] || continue
+
+    owner="$(printf '%s' "$disk_line" | sed -n 's/.*| owner=\([^|]*\)$/\1/p' | sed 's/^ *//;s/ *$//')"
+    size_h="$(printf '%s' "$disk_line" | sed -n 's/.*size_h=\([^|]*\) |.*/\1/p' | sed 's/^ *//;s/ *$//')"
+
+    [[ -n "$owner" && "$owner" != "Unknown" ]] || continue
+
+    persistence="$(printf '%s\n' "$svc_map" | /usr/bin/awk -F '\t' -v o="$owner" '$1==o{print $2; exit}')"
+    [[ -n "$persistence" ]] || continue
+
+    if [[ -z "$size_h" || "$size_h" == "-" ]]; then
+      size_h="(large disk use)"
+    fi
+
+    _insight_log "${owner} uses ${size_h} and runs at ${persistence}"
+  done <<<"${DISK_FLAGGED_RECORDS_LIST}"
+}
+
 run_started_s="$(_now_epoch_s)"
 
 # ----------------------------
@@ -503,6 +563,9 @@ case "$MODE" in
     exit 1
     ;;
 esac
+
+ # v2.3.0: cross-module correlation insights (scan-only outputs; logging only)
+_emit_disk_service_insights
 
 summary_add "timing: startup=${STARTUP_DUR_S:-0}s launchd=${LAUNCHD_DUR_S:-0}s caches=${CACHES_DUR_S:-0}s logs=${LOGS_DUR_S:-0}s disk=${DISK_DUR_S:-0}s leftovers=${LEFTOVERS_DUR_S:-0}s total=$(_elapsed_s "$run_started_s")s"
 summary_print

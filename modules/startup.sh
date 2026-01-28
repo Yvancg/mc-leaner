@@ -61,6 +61,7 @@ if ! command -v log >/dev/null 2>&1; then
   }
 fi
 
+
 if ! command -v explain_log >/dev/null 2>&1; then
   explain_log() {
     # Purpose: Best-effort verbose logging when --explain is enabled.
@@ -68,6 +69,22 @@ if ! command -v explain_log >/dev/null 2>&1; then
     if [[ "${EXPLAIN:-false}" == "true" ]]; then
       log "$@"
     fi
+  }
+fi
+
+# Defensive fallback for service_emit_record (v2.3.0 contract-lock SERVICE? emission)
+if ! command -v service_emit_record >/dev/null 2>&1; then
+  service_emit_record() {
+    # Purpose: Best-effort SERVICE? output when shared helpers are not loaded.
+    # Safety: Logging only; does not change scan scope or cleanup behavior.
+    local scope="${1:-}"
+    local persistence="${2:-}"
+    local owner="${3:-Unknown}"
+    local label="${4:-}"
+    local network_facing="false"
+
+    [[ -n "$scope" && -n "$persistence" && -n "$label" ]] || return 0
+    log "SERVICE? scope=${scope} | persistence=${persistence} | owner=${owner:-Unknown} | network_facing=${network_facing} | label=${label}"
   }
 fi
 
@@ -107,11 +124,27 @@ _startup_plist_extract_raw() {
   /usr/bin/plutil -extract "${keypath}" raw -o - "${plist}" 2>/dev/null || true
 }
 
+
 _startup_plist_extract_xml() {
   # Usage: _startup_plist_extract_xml <plist> <keypath>
   # Returns an XML representation (useful for dict/array/bool presence checks), otherwise empty.
   local plist="$1" keypath="$2"
   /usr/bin/plutil -extract "${keypath}" xml1 -o - "${plist}" 2>/dev/null || true
+}
+
+# Extract the first string from an array key via XML (for ProgramArguments etc).
+_startup_plist_extract_first_string_in_array() {
+  # Usage: _startup_plist_extract_first_string_in_array <plist> <keypath>
+  # Purpose: When raw extraction of array elements fails, fall back to XML and take the first <string>.
+  # Safety: Read-only.
+  local plist="$1" keypath="$2"
+  local xml=""
+
+  xml="$(_startup_plist_extract_xml "${plist}" "${keypath}")"
+  [[ -n "$xml" ]] || return 0
+
+  # Extract first <string>...</string> value.
+  printf '%s' "$xml" | sed -n 's/.*<string>\(.*\)<\/string>.*/\1/p' | head -n 1
 }
 
 _startup_infer_timing_from_plist() {
@@ -164,6 +197,27 @@ _startup_plist_exec() {
   argv0="$(_startup_plist_extract_raw "${plist}" ProgramArguments.0 | sed 's/^\s*//;s/\s*$//')"
   if [[ -n "${argv0}" ]]; then
     echo "${argv0}"
+    return 0
+  fi
+
+  # Fallback: parse ProgramArguments as XML and take the first string.
+  argv0="$(_startup_plist_extract_first_string_in_array "${plist}" ProgramArguments | sed 's/^\s*//;s/\s*$//')"
+  if [[ -n "${argv0}" ]]; then
+    echo "${argv0}"
+    return 0
+  fi
+
+  # Fallback: some plists use BundleProgram.
+  program="$(_startup_plist_extract_raw "${plist}" BundleProgram | sed 's/^\s*//;s/\s*$//')"
+  if [[ -n "${program}" ]]; then
+    echo "${program}"
+    return 0
+  fi
+
+  # Fallback: XPC services sometimes declare a ServiceExecutable.
+  program="$(_startup_plist_extract_raw "${plist}" XPCService.ServiceExecutable | sed 's/^\s*//;s/\s*$//')"
+  if [[ -n "${program}" ]]; then
+    echo "${program}"
     return 0
   fi
 
@@ -343,7 +397,20 @@ _startup_scan_launchd_dir() {
   local explain="$1" dir="$2" source="$3"
   [[ -d "${dir}" ]] || return 0
 
-  local plist="" label="" exec_path="" timing="" owner_meta="" owner="" how="" conf=""
+  local plist="" label="" exec_path="" timing="" owner_meta="" owner="" how="" conf="" scope=""
+
+  # Compute scope once per directory
+  case "${dir}" in
+    /Library/*|/System/Library/*)
+      scope="system"
+      ;;
+    "${HOME}"/*)
+      scope="user"
+      ;;
+    *)
+      scope="user"
+      ;;
+  esac
 
   while IFS= read -r -d '' plist; do
     label="$(_startup_plist_label "${plist}")"
@@ -359,6 +426,9 @@ _startup_scan_launchd_dir() {
     impact="$(_startup_infer_impact "${timing}" "${label}" "${exec_path}" "${owner}" "${conf}")"
 
     _startup_emit_item "${explain}" "${timing}" "${source}" "${label}" "${exec_path}" "${owner}" "${how}" "${conf}" "${impact}"
+
+    # Emit SERVICE? v2.3.0 contract-lock record (additive; no network-facing logic)
+    service_emit_record "${scope}" "${timing}" "${owner}" "${label}"
 
     STARTUP_CHECKED=$((STARTUP_CHECKED + 1))
 
@@ -435,6 +505,9 @@ APPLESCRIPT
     impact="$(_startup_infer_impact "${timing}" "${label}" "${exec_path}" "${owner}" "${conf}")"
 
     _startup_emit_item "${explain}" "${timing}" "LoginItem" "${label}" "${exec_path}" "${owner}" "${how}" "${conf}" "${impact}"
+
+    # Emit SERVICE? v2.3.0 contract-lock record for login items (user, login, ...)
+    service_emit_record "user" "login" "${owner}" "${label}"
 
     STARTUP_CHECKED=$((STARTUP_CHECKED + 1))
     if [[ "${owner}" == "Unknown" ]]; then

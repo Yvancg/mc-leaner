@@ -4,6 +4,7 @@
 # Purpose: explain why some paths cannot be inspected/moved (TCC, SIP, non-interactive shell)
 # Safety: inspection-only; no file moves, no privilege escalation, no destructive operations
 
+# NOTE: Modules run with strict mode for deterministic failures and auditability.
 set -euo pipefail
 
 # Expected globals (provided by entrypoint):
@@ -14,17 +15,53 @@ set -euo pipefail
 #   log, explain_log, is_cmd, summary_add
 
 # ----------------------------
-# Small helpers (local to module)
+# Defensive Checks
+# ----------------------------
+# Purpose: Provide safe fallbacks when shared helpers are not loaded.
+# Safety: Logging and capability checks only; must not change inspection behavior.
+
+if ! command -v log >/dev/null 2>&1; then
+  log() {
+    printf '%s\n' "$*"
+  }
+fi
+
+if ! command -v explain_log >/dev/null 2>&1; then
+  explain_log() {
+    # Purpose: Best-effort verbose logging when --explain is enabled.
+    # Safety: Logging only.
+    if [[ "${EXPLAIN:-false}" == "true" ]]; then
+      log "$@"
+    fi
+  }
+fi
+
+if ! command -v summary_add >/dev/null 2>&1; then
+  summary_add() {
+    # Purpose: No-op fallback when run outside the entrypoint.
+    # Safety: Logging only.
+    return 0
+  }
+fi
+
+if ! command -v is_cmd >/dev/null 2>&1; then
+  is_cmd() {
+    command -v "$1" >/dev/null 2>&1
+  }
+fi
+
+# ----------------------------
+# Small Helpers
 # ----------------------------
 is_interactive() {
-  # Purpose: determine whether we can safely prompt on stdin
-  # Safety: inspection only
+  # Purpose: Determine whether we can safely prompt on stdin.
+  # Safety: Inspection only.
   [ -t 0 ] && [ -t 1 ]
 }
 
 detect_host_app() {
-  # Purpose: best-effort identify the host app (Terminal, iTerm, VS Code)
-  # Safety: inspection only
+  # Purpose: Best-effort identify the host app (Terminal, iTerm2, VS Code).
+  # Safety: Inspection only.
   # Note: PPID is often a shell (zsh/bash). We walk up the process tree to find the GUI host.
 
   if ! is_cmd ps; then
@@ -106,8 +143,8 @@ detect_host_app() {
 }
 
 can_gui_prompt() {
-  # Purpose: determine whether AppleScript prompts are possible
-  # Safety: inspection only
+  # Purpose: Determine whether AppleScript prompts are possible.
+  # Safety: Inspection only.
   if ! is_cmd osascript; then
     return 1
   fi
@@ -140,8 +177,8 @@ probe_listable() {
 }
 
 print_fda_steps() {
-  # Purpose: show short, actionable steps to grant Full Disk Access to the host app
-  # Safety: logging only
+  # Purpose: Show short, actionable steps to grant Full Disk Access to the host app.
+  # Safety: Logging only.
   local host_app="$1"
 
   log "Permissions: likely blocked by macOS privacy controls (best-effort inference)."
@@ -162,10 +199,13 @@ print_fda_steps() {
 }
 
 run_permissions_module() {
-  # Purpose: run environment checks and print clear diagnostics
-  # Safety: inspection only
+  # Purpose: Run environment checks and print clear diagnostics.
+  # Safety: Inspection only.
 
   log "Permissions: scanning execution environment (inspection-only)..."
+
+  # Inputs
+  log "Permissions: apply=${APPLY:-false} explain=${EXPLAIN:-false} backup_dir=${BACKUP_DIR:-<none>}"
 
   local interactive="no"
   local host_app="unknown"
@@ -201,7 +241,7 @@ run_permissions_module() {
   local tcc_notes=()
 
   # User-level TCC sensitive locations
-  local user_home="${HOME:-}" 
+  local user_home="${HOME:-}"
   if [ -n "$user_home" ]; then
     local p
     for p in \
@@ -281,7 +321,7 @@ run_permissions_module() {
 }
 
 # ----------------------------
-# Module contract
+# Module Contract
 # ----------------------------
 # Purpose: provide `run_permissions_module` for the entrypoint to call.
 # Safety: do not auto-execute on source.

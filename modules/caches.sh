@@ -4,15 +4,18 @@
 # Purpose: Inspect user-level cache locations and surface large cache directories for review
 # Safety: User-level only; defaults to dry-run; never deletes; cleanup relocates caches to backups with confirmation
 
+# NOTE: Modules run with strict mode for deterministic failures and auditability.
 set -euo pipefail
 
 # ----------------------------
-# Defensive: ensure explain_log exists (modules should not assume it)
+# Defensive Checks
 # ----------------------------
+# Purpose: Provide safe fallbacks when shared helpers are not loaded.
+# Safety: Logging only; must not change inspection or cleanup behavior.
 if ! type explain_log >/dev/null 2>&1; then
   explain_log() {
-    # Purpose: best-effort verbose logging when --explain is enabled
-    # Safety: Logging only; does not change behavior
+    # Purpose: Best-effort verbose logging when --explain is enabled.
+    # Safety: Logging only.
     if [[ "${EXPLAIN:-false}" == "true" ]]; then
       log "$@"
     fi
@@ -20,7 +23,7 @@ if ! type explain_log >/dev/null 2>&1; then
 fi
 
 # ----------------------------
-# Module entry point
+# Module Entry Point
 # ----------------------------
 run_caches_module() {
   # Contract:
@@ -31,7 +34,10 @@ run_caches_module() {
   local explain="${4:-false}"
   local inventory_index_file="${5:-}"
 
-  # Reserved args for contract consistency.
+  # Inputs
+  log "Caches: mode=${mode} apply=${apply} backup_dir=${backup_dir} explain=${explain} inventory_index=${inventory_index_file:-<none>}"
+
+  # Reserved args for contract consistency (modules share a stable CLI signature).
   : "${mode}" "${backup_dir}" "${inventory_index_file}"
 
   # Explain flag used throughout via EXPLAIN.
@@ -44,7 +50,7 @@ run_caches_module() {
   CACHES_DUR_S=0
 
   _caches_finish_timing() {
-    # Must be safe under `set -u` and when invoked on early returns.
+    # SAFETY: must be safe under `set -u` and when invoked on early returns.
     _caches_t1="$(/bin/date +%s 2>/dev/null || echo '')"
     if [[ -n "${_caches_t0:-}" && -n "${_caches_t1:-}" ]]; then
       CACHES_DUR_S=$((_caches_t1 - _caches_t0))
@@ -57,7 +63,7 @@ run_caches_module() {
   trap _caches_on_return RETURN
 
   # ----------------------------
-  # Helper: _inventory_ready (moved before first use)
+  # Helper: _inventory_ready
   # ----------------------------
   _inventory_ready() {
     if [[ -n "${inventory_index_file:-}" && -f "${inventory_index_file:-}" ]]; then
@@ -67,7 +73,7 @@ run_caches_module() {
   }
 
   # ----------------------------
-  # Scan configuration
+  # Scan Configuration
   # ----------------------------
   local min_mb=200  # TODO: make configurable via CLI when the interface stabilizes
 
@@ -82,23 +88,23 @@ run_caches_module() {
   fi
 
   # ----------------------------
-  # Helper: size and timestamps (macOS compatible)
+  # Helper: Size and Timestamps
   # ----------------------------
   _du_kb() {
-    # Purpose: return size in KB for a path (macOS-compatible du invocation)
+    # Purpose: Return size in KB for a path (macOS-compatible du invocation).
     du -sk "$1" 2>/dev/null | awk '{print $1}'
   }
 
   _mtime() {
-    # Purpose: return last modified time as a readable string (macOS stat)
+    # Purpose: Return last modified time as a readable string (macOS stat).
     local epoch
     epoch="$(stat -f "%m" "$1" 2>/dev/null || echo "")"
     [[ -n "$epoch" ]] && date -r "$epoch" +"%Y-%m-%d %H:%M:%S" || echo "unknown"
   }
 
   _norm_key() {
-    # Lowercase and remove non-alphanumerics for loose matching (matches inventory normalized keys)
-    # Example: "Google Drive" -> "googledrive"; "group.is.workflow.shortcuts" -> "groupisworkflowshortcuts"
+    # Purpose: Normalize a name into an inventory-style key.
+    # Example: "Google Drive" -> "googledrive"; "group.is.workflow.shortcuts" -> "groupisworkflowshortcuts".
     echo "$1" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9'
   }
 
@@ -185,7 +191,7 @@ run_caches_module() {
   }
 
   _guess_owner_app() {
-    # Purpose: map a cache directory to an owning app label using Inventory when possible
+    # Purpose: Map a cache directory to an owning app label using Inventory when possible.
     # Returns a human label suitable for logs. Does not perform any writes.
     local p="$1"
     local base out
@@ -257,7 +263,7 @@ run_caches_module() {
   }
 
   # ----------------------------
-  # Scan targets (user-level only)
+  # Scan Targets (User-Level Only)
   # ----------------------------
   local home="$HOME"
 
@@ -272,8 +278,8 @@ run_caches_module() {
 
   # Best-effort cleanup of temp files created by this module.
   _caches_cleanup_tmp() {
-    # NOTE: This trap can run after `run_caches_module` returns, when locals may be unset.
-    # Use `:-` defaults everywhere to avoid `set -u` unbound-variable failures.
+    # SAFETY: this EXIT trap can run after `run_caches_module` returns.
+    # Use `:-` defaults to avoid `set -u` unbound-variable failures.
     rm -f \
       "${below_report_file:-}" \
       "${candidate_list_file:-}" \
@@ -285,7 +291,7 @@ run_caches_module() {
   trap _caches_cleanup_tmp EXIT
 
   # ----------------------------
-  # Batch size scan (much faster than per-dir du)
+  # Batch Size Scan
   # ----------------------------
 
   # Target 1: ~/Library/Caches (one level children)
@@ -379,7 +385,7 @@ run_caches_module() {
   fi
 
   # ----------------------------
-  # Report / optional relocation (grouped)
+  # Report and Optional Relocation
   # ----------------------------
   local report_file
   local flagged_count=0
@@ -494,7 +500,7 @@ run_caches_module() {
   fi
 
   # ----------------------------
-  # Module summary (global footer aggregation)
+  # Module Summary
   # ----------------------------
 
   # Exported summary fields for mc-leaner.

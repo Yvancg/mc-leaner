@@ -4,10 +4,11 @@
 # Purpose: Report Intel-only (x86_64) Mach-O executables for visibility on Apple Silicon systems
 # Safety: Reporting-only. Never modifies, moves, or deletes files.
 
+# NOTE: Modules run with strict mode for deterministic failures and auditability.
 set -euo pipefail
 
 # ----------------------------
-# Entry point
+# Module Entry Point
 # ----------------------------
 
 run_intel_report() {
@@ -15,27 +16,29 @@ run_intel_report() {
   local explain="${1:-${EXPLAIN:-false}}"
   : "${EXPLAIN:=false}"
 
+  # Inputs
+  log "Intel: explain=${explain} inventory_ready=${INVENTORY_READY:-false} inventory_index=${INVENTORY_INDEX_FILE:-<none>}"
+
   # ----------------------------
-  # Report destination
+  # Report Destination
   # ----------------------------
   local out="$HOME/Desktop/intel_binaries.txt"
 
   # ----------------------------
-  # Scan roots
+  # Scan Roots
   # ----------------------------
   # Default roots (safe, broad).
   # If inventory is available, prefer scanning the concrete app bundle paths instead of whole directories.
   local roots=()
 
-  if [[ "${INVENTORY_READY:-false}" == "true" && -n "${INVENTORY_FILE:-}" && -r "${INVENTORY_FILE:-}" ]]; then
-    # Inventory rows are tab-separated:
-    # app <source> <name> <bundle_id> <path>
-    # We scan app bundle paths directly for speed and accuracy.
-    while IFS=$'\t' read -r kind src name bid app_path; do
-      [[ "$kind" == "app" ]] || continue
-      [[ -n "$app_path" && "$app_path" == /* && -d "$app_path" ]] || continue
-      roots+=("$app_path")
-    done < "${INVENTORY_FILE}"
+  if [[ "${INVENTORY_READY:-false}" == "true" && -n "${INVENTORY_INDEX_FILE:-}" && -r "${INVENTORY_INDEX_FILE:-}" ]]; then
+    # Inventory index rows are tab-separated:
+    # key<TAB>name<TAB>source<TAB>path
+    # We prefer scanning concrete .app bundle paths instead of whole directories.
+    while IFS=$'\t' read -r key name src path; do
+      [[ -n "${path:-}" && "${path:-}" == /* && "${path:-}" == *.app && -d "${path:-}" ]] || continue
+      roots+=("$path")
+    done < "${INVENTORY_INDEX_FILE}"
 
     # Keep /opt for vendor tools and package installs.
     roots+=("/opt")
@@ -103,7 +106,7 @@ run_intel_report() {
   # - This scan is informational only and has no side effects
 
   # ----------------------------
-  # Intel-only executable scan
+  # Intel-Only Executable Scan
   # ----------------------------
   # We want Intel-only executables: x86_64 slice present AND no arm64/arm64e slice.
   # `file` output can be multi-line; we avoid that entirely by testing paths directly.
@@ -174,7 +177,7 @@ run_intel_report() {
   fi
 
   # ----------------------------
-  # Final counts (authoritative)
+  # Final Counts (Authoritative)
   # ----------------------------
   local report_lines=0
   local unique_files=0
@@ -188,7 +191,7 @@ run_intel_report() {
   rm -f "$tmp_out" 2>/dev/null || true
 
   # ----------------------------
-  # Preview: top sources + sample files
+  # Preview: Top Sources and Sample Files
   # ----------------------------
   # Present a useful overview instead of the first 10 alphabetically.
   # - First: top sources (apps / roots) by Intel-only file count
@@ -262,7 +265,7 @@ run_intel_report() {
   fi
 
   # ----------------------------
-  # Explain-mode grouping summary
+  # Explain-Mode Grouping Summary
   # ----------------------------
   if [[ "$explain" == "true" && "$unique_files" -gt 0 && -f "$out" ]]; then
     log "Intel (explain): top locations by Intel-only file count (top 10):"
@@ -281,7 +284,7 @@ run_intel_report() {
   fi
 
   # ----------------------------
-  # Module end-of-run summary
+  # Module End-of-Run Summary
   # ----------------------------
   if [[ "$unique_files" -eq 0 ]]; then
     summary_add "intel" "flagged=0 report=${out}"

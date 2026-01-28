@@ -4,15 +4,18 @@
 # Purpose: Heuristically identify orphaned LaunchAgents and LaunchDaemons and optionally relocate their plists to backups
 # Safety: Defaults to dry-run; never deletes; moves require explicit `--apply` and per-item confirmation; hard-skips security software
 
+# NOTE: Modules run with strict mode for deterministic failures and auditability.
 set -euo pipefail
 
 # ----------------------------
-# Defensive: ensure explain_log exists (modules should not assume it)
+# Defensive Checks
 # ----------------------------
+# Purpose: Provide safe fallbacks when shared helpers are not loaded.
+# Safety: Logging only; must not change inspection or cleanup behavior.
 if ! type explain_log >/dev/null 2>&1; then
   explain_log() {
-    # Purpose: best-effort verbose logging when --explain is enabled
-    # Safety: Logging only; does not change behavior
+    # Purpose: Best-effort verbose logging when --explain is enabled.
+    # Safety: Logging only.
     if [[ "${EXPLAIN:-false}" == "true" ]]; then
       log "$@"
     fi
@@ -20,12 +23,12 @@ if ! type explain_log >/dev/null 2>&1; then
 fi
 
 # ----------------------------
-# Defensive: ensure tmpfile exists (modules should not assume it)
+# Defensive Checks
 # ----------------------------
 if ! type tmpfile >/dev/null 2>&1; then
   tmpfile() {
-    # Purpose: create a temporary file path
-    # Safety: returns path only; caller owns content
+    # Purpose: Create a temporary file path.
+    # Safety: Returns a path only; caller owns content.
     if is_cmd mktemp; then
       mktemp 2>/dev/null || mktemp -t mc-leaner 2>/dev/null
     else
@@ -38,11 +41,14 @@ if ! type tmpfile >/dev/null 2>&1; then
 fi
 
 # ----------------------------
-# Module entry point
+# Module Entry Point
 # ----------------------------
 run_launchd_module() {
   local mode="$1" apply="$2" backup_dir="$3"
   local inventory_index_file="${4:-}"
+
+  # Inputs
+  log "Launchd: mode=${mode} apply=${apply} backup_dir=${backup_dir} inventory_index=${inventory_index_file:-<none>}"
 
   # Timing (best-effort wall clock duration for this module).
   local _launchd_t0="" _launchd_t1=""
@@ -87,7 +93,7 @@ run_launchd_module() {
   fi
 
   # ----------------------------
-  # Summary: module end-of-run contract
+  # Module Summary Contract
   # ----------------------------
   _launchd_summary_emit() {
     # Purpose: emit a concise end-of-run summary line for global reporting
@@ -106,7 +112,7 @@ run_launchd_module() {
   }
 
   # ----------------------------
-  # Helper: resolve launchd program path from a plist
+  # Helper: Resolve Program Path
   # ----------------------------
   _launchd_program_path() {
     # Purpose: Extract the executable path from a launchd plist (Program or ProgramArguments[0])
@@ -144,7 +150,7 @@ run_launchd_module() {
   }
 
   # ----------------------------
-  # Inventory-based installed checks
+  # Inventory-Based Installed Checks
   # ----------------------------
   _launchd_norm_key() {
     # Purpose: normalize a string to a conservative lookup key (lowercase alnum only)
@@ -197,7 +203,7 @@ run_launchd_module() {
   }
 
   # ----------------------------
-  # Snapshot active launchctl jobs
+  # Snapshot Active launchctl Jobs
   # ----------------------------
   log "Scanning active launchctl jobs..."
   active_jobs_file="$(tmpfile)"
@@ -212,7 +218,7 @@ run_launchd_module() {
   }
 
   # ----------------------------
-  # Launchd scan targets
+  # Launchd Scan Targets
   # ----------------------------
   log "Checking LaunchAgents/LaunchDaemons..."
   local paths=(
@@ -223,7 +229,7 @@ run_launchd_module() {
   )
 
   # ----------------------------
-  # Heuristic scan
+  # Heuristic Scan
   # ----------------------------
   local checked=0
   local orphan_found=0
@@ -244,27 +250,27 @@ run_launchd_module() {
 
       checked=$((checked + 1))
 
-      # HARD SAFETY: never touch security or endpoint protection software
+      # HARD SAFETY: never touch security, endpoint protection, or EDR tooling.
       if is_protected_label "$label"; then
         log "SKIP (protected): $plist_path"
         explain_log "  reason: label protected (${label})"
         continue
       fi
 
-      # Skip Homebrew-managed services (users should manage these via Homebrew)
+      # SAFETY: skip Homebrew-managed services (users should manage these via Homebrew).
       if is_homebrew_service_label "$label"; then
         log "SKIP (homebrew service): $plist_path"
         explain_log "  reason: homebrew-managed label (${label})"
         continue
       fi
 
-      # Skip active services to avoid disrupting running processes
+      # SAFETY: skip active services to avoid disrupting running processes.
       if is_active_job "$label"; then
         explain_log "SKIP (active job): $plist_path (label: $label)"
         continue
       fi
 
-      # Skip labels that match installed software via inventory index (preferred)
+      # Skip labels that match installed software via inventory index (best-effort guard).
       if _launchd_label_matches_inventory "$label"; then
         explain_log "SKIP (installed-match via inventory): $plist_path (label: $label)"
         continue
@@ -273,8 +279,8 @@ run_launchd_module() {
       local prog
       prog="$(_launchd_program_path "$plist_path")"
 
-      # If we cannot resolve a program path, skip instead of guessing.
-      # This prevents false positives for plists that only define other keys.
+      # SAFETY: if we cannot resolve a program path, skip instead of guessing.
+      # This reduces false positives for plists that only define other keys.
       if [[ -z "$prog" ]]; then
         explain_log "SKIP (unknown program): $plist_path (label: $label, program: <none>)"
         continue
@@ -290,8 +296,8 @@ run_launchd_module() {
         continue
       fi
 
-      # NOTE: only plists with a missing program path are treated as orphans; confirmation is still required
-      # SAFETY: only move items when explicitly running in clean mode with --apply
+      # NOTE: only plists with a missing program path are treated as orphans; confirmation is still required.
+      # SAFETY: move only in clean mode with --apply and per-item confirmation.
       if [[ "$mode" == "clean" && "$apply" == "true" ]]; then
         if ask_yes_no "Orphaned launch item detected:\n$plist_path\n\nMove to backup folder?"; then
           # Move contract: safe_move prints the final destination path on success.

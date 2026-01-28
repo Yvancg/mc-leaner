@@ -26,8 +26,14 @@
 #   - App discovery uses `find -L` to capture symlinked Apple apps (Cryptex).
 #   - Bundle id resolution is best-effort (mdls, then Info.plist).
 
+# NOTE: This module uses best-effort probing across app roots and optional Homebrew.
+# It enables `set -u` and `pipefail` but avoids `set -e` to prevent aborting on expected absence/permission errors.
 set -uo pipefail
 
+#
+# ----------------------------
+# Exported Globals
+# ----------------------------
 # These are exported for other modules.
 INVENTORY_FILE=""
 INVENTORY_INDEX_FILE=""
@@ -41,9 +47,19 @@ INVENTORY_BREW_BINS_READY="false"
 INVENTORY_CACHE_READY="false"
 # Keys are inventory index keys; values are the full hit line: name\tsource\tapp_path
 
+#
+# ----------------------------
+# Logging Helpers
+# ----------------------------
 _inventory_log() {
-  # shellcheck disable=SC2154
-  log "$@"
+  # Purpose: Centralize inventory logging.
+  # Safety: Logging only.
+  if command -v log >/dev/null 2>&1; then
+    # shellcheck disable=SC2154
+    log "$@"
+  else
+    printf '%s\n' "$*"
+  fi
 }
 
 _inventory_debug() {
@@ -53,8 +69,12 @@ _inventory_debug() {
   fi
 }
 
+#
+# ----------------------------
+# Temp Files
+# ----------------------------
 _inventory_tmpfile() {
-  # Try mktemp with template first, fall back to simpler mktemp.
+  # Purpose: Create a temp file (template first, then fallback).
   local f=""
   f="$(mktemp -t mc-leaner_inventory.XXXXXX 2>/dev/null || true)"
   if [[ -z "$f" ]]; then
@@ -63,8 +83,12 @@ _inventory_tmpfile() {
   echo "$f"
 }
 
+#
+# ----------------------------
+# TSV Helpers
+# ----------------------------
 _inventory_sanitize_tsv() {
-  # Replace tabs/newlines to keep TSV sane.
+  # Purpose: Sanitize a field so it is safe to write into a TSV.
   local s="$1"
   s="${s//$'\t'/ }"
   s="${s//$'\n'/ }"
@@ -72,8 +96,12 @@ _inventory_sanitize_tsv() {
   echo "$s"
 }
 
+#
+# ----------------------------
+# Lookup Cache
+# ----------------------------
 _inventory_enable_cache_if_supported() {
-  # macOS system bash is often 3.2 (no associative arrays). Only enable when supported.
+  # Purpose: Enable an associative-array lookup cache when Bash supports it (>= 4).
   if [[ -n "${BASH_VERSINFO:-}" && "${BASH_VERSINFO[0]:-0}" -ge 4 ]]; then
     # Re-declare each time to ensure correct type, then clear.
     unset -v INVENTORY_CACHE_HITS 2>/dev/null || true
@@ -85,8 +113,12 @@ _inventory_enable_cache_if_supported() {
   fi
 }
 
+#
+# ----------------------------
+# App Metadata
+# ----------------------------
 _inventory_bundle_id_for_app() {
-  # Best effort. Return empty string if unknown.
+  # Purpose: Return the bundle id for an app bundle (best-effort).
   local app_path="$1"
   local bid=""
 
@@ -107,6 +139,10 @@ _inventory_bundle_id_for_app() {
   echo "$bid"
 }
 
+#
+# ----------------------------
+# Index Writers
+# ----------------------------
 _inventory_add_row() {
   # kind source name bundle_id app_path brew_id
   local kind="$1"; shift
@@ -143,8 +179,8 @@ _inventory_add_index() {
 }
 
 _inventory_normalize_app_key() {
-  # Lowercase, strip spaces and common suffixes for a fuzzy-ish key.
-  # This is intentionally conservative.
+  # Purpose: Normalize an app name into a conservative inventory key.
+  # Safety: Conservative normalization reduces false-positive ownership matches.
   local s="$1"
   s="${s%.app}"
   # lowercase
@@ -154,6 +190,10 @@ _inventory_normalize_app_key() {
   echo "$s"
 }
 
+#
+# ----------------------------
+# App Scanning
+# ----------------------------
 _inventory_scan_apps_root() {
   local root="$1"
   local source="$2"
@@ -218,6 +258,10 @@ _inventory_scan_apps_root() {
   )
 }
 
+#
+# ----------------------------
+# Homebrew Scanning
+# ----------------------------
 _inventory_have_brew() {
   command -v brew >/dev/null 2>&1
 }
@@ -319,6 +363,10 @@ _inventory_build_brew_bins() {
   return 0
 }
 
+#
+# ----------------------------
+# Index Maintenance
+# ----------------------------
 _inventory_dedupe_index_file() {
   # Deduplicate INVENTORY_INDEX_FILE in-place.
   # Index lookups only need one hit per key, so keeping the first match is fine.
@@ -355,6 +403,10 @@ _inventory_dedupe_index_file() {
   return 0
 }
 
+#
+# ----------------------------
+# Public API
+# ----------------------------
 inventory_build() {
   # Public: build inventory files and export globals.
   # Respects EXPLAIN for verbose logging.
@@ -577,14 +629,17 @@ resolve_owner_from_path() {
 }
 
 run_inventory_module() {
-  # Entry point expected by mc-leaner.sh
-  # Args: mode apply backup_dir
+  # Contract:
+  #   run_inventory_module <mode> <apply> <backup_dir>
   local mode="$1"
   local apply="$2"
   local backup_dir="$3"
 
+  # Inputs
+  _inventory_log "Inventory: mode=${mode} apply=${apply} backup_dir=${backup_dir} (inspection-only; apply ignored)"
+
   # Inventory is always inspection-only.
-  _inventory_debug "mode=$mode apply=$apply backup=$backup_dir"
+  _inventory_debug "mode=${mode} apply=${apply} backup=${backup_dir}"
 
   inventory_build
 

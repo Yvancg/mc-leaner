@@ -3,9 +3,8 @@
 # mc-leaner: startup
 # Purpose: Inspect macOS startup execution surfaces (launchd + login items) for visibility.
 # Safety: Inspection-only (never modifies system state). In clean/apply mode, it still only scans.
-
-
-set -o pipefail
+# NOTE: Modules run with strict mode for deterministic failures and auditability.
+set -euo pipefail
 
 # Contract: run_startup_module <mode> <apply> <backup_dir> <explain> [inventory_index]
 # Note: Kept near the top so simple greps and partial prints (e.g., `sed -n '1,260p'`) will find it.
@@ -50,16 +49,26 @@ set -o pipefail
 #     estimated_risk=<low|medium|high>
 #   risk: startup_items_may_slow_boot        # only when boot_flagged > 0
 
-# ----------------------------------------------------------------------------
-# Logging fallbacks (when module is run standalone)
-# ----------------------------------------------------------------------------
+# ----------------------------
+# Defensive Checks
+# ----------------------------
+# Purpose: Provide safe fallbacks when shared helpers are not loaded.
+# Safety: Logging only; must not change inspection behavior.
 
-if ! declare -F log_info >/dev/null 2>&1; then
-  log_info() { echo "$*"; }
+if ! command -v log >/dev/null 2>&1; then
+  log() {
+    printf '%s\n' "$*"
+  }
 fi
 
-if ! declare -F log_explain >/dev/null 2>&1; then
-  log_explain() { echo "EXPLAIN: $*"; }
+if ! command -v explain_log >/dev/null 2>&1; then
+  explain_log() {
+    # Purpose: Best-effort verbose logging when --explain is enabled.
+    # Safety: Logging only.
+    if [[ "${EXPLAIN:-false}" == "true" ]]; then
+      log "$@"
+    fi
+  }
 fi
 
 # -----------------------------------------------------------------------------
@@ -70,11 +79,11 @@ _startup_explain() {
   local explain="$1"; shift || true
   [[ "${explain}" == "true" ]] || return 0
 
-  # Project runner is expected to provide log_explain; fall back to log_info if needed.
-  if declare -F log_explain >/dev/null 2>&1; then
-    log_explain "$@"
+  # Runner is expected to provide explain_log; fall back to log when needed.
+  if command -v explain_log >/dev/null 2>&1; then
+    explain_log "$@"
   else
-    log_info "EXPLAIN: $*"
+    log "EXPLAIN: $*"
   fi
 }
 
@@ -321,7 +330,7 @@ _startup_emit_item() {
     impact="low"
   fi
 
-  log_info "STARTUP? ${timing} | source: ${source} | owner: ${owner} | conf: ${conf} | impact: ${impact} | label: ${label} | exec: ${exec_path}"
+  log "STARTUP? ${timing} | source: ${source} | owner: ${owner} | conf: ${conf} | impact: ${impact} | label: ${label} | exec: ${exec_path}"
   _startup_explain "${explain}" "Startup item | timing=${timing} | source=${source} | label=${label} | exec=${exec_path} | attribution=${how} | confidence=${conf}"
 }
 
@@ -452,10 +461,33 @@ run_startup_module() {
   local explain="${4:-false}"
   local inventory_index="${5:-}"
 
-  : "${backup_dir}" "${inventory_index}" # reserved for contract consistency
+  # Inputs
+  log "Startup: mode=${mode} apply=${apply} backup_dir=${backup_dir} explain=${explain} inventory_index=${inventory_index:-<none>}"
 
+  # Explain flag used throughout via EXPLAIN.
+  local _startup_prev_explain="${EXPLAIN:-false}"
+  EXPLAIN="${explain}"
+
+  : "${mode}" "${backup_dir}" "${inventory_index}" # reserved for contract consistency
+
+  # Timing (best-effort wall clock duration for this module).
   local _startup_t0="" _startup_t1=""
   _startup_t0="$(/bin/date +%s 2>/dev/null || echo '')"
+  STARTUP_DUR_S=0
+
+  _startup_finish_timing() {
+    # SAFETY: must be safe under `set -u` and when invoked on early returns.
+    _startup_t1="$(/bin/date +%s 2>/dev/null || echo '')"
+    if [[ -n "${_startup_t0:-}" && -n "${_startup_t1:-}" ]]; then
+      STARTUP_DUR_S=$((_startup_t1 - _startup_t0))
+    fi
+  }
+
+  _startup_on_return() {
+    EXPLAIN="${_startup_prev_explain:-false}"
+    _startup_finish_timing
+  }
+  trap _startup_on_return RETURN
 
   # Summary counters (exported via globals for mc-leaner.sh run summary)
   STARTUP_CHECKED=0
@@ -495,13 +527,7 @@ run_startup_module() {
   _startup_scan_login_items "${explain}"
 
   # Export flagged identifiers for run summary consumption.
-  STARTUP_FLAGGED_IDS_LIST="$(printf '%s\n' "${STARTUP_FLAGGED_IDS[@]}")"
-
-  # Timing (best-effort wall clock duration for this module).
-  _startup_t1="$(/bin/date +%s 2>/dev/null || echo '')"
-  if [[ -n "${_startup_t0}" && -n "${_startup_t1}" ]]; then
-    STARTUP_DUR_S=$((_startup_t1 - _startup_t0))
-  fi
+  STARTUP_FLAGGED_IDS_LIST="$(printf '%s\n' "${STARTUP_FLAGGED_IDS[@]}" | sed '$s/\n$//')"
 
   # Estimated risk (v2.2.0): conservative summary hinting.
   STARTUP_ESTIMATED_RISK="low"
@@ -520,7 +546,7 @@ run_startup_module() {
   STARTUP_SURFACE_BREAKDOWN="${STARTUP_SURFACE}"
   STARTUP_ESTIMATED_RISK="${STARTUP_ESTIMATED_RISK}"
 
-  log_info "Startup: inspected ${STARTUP_CHECKED} item(s); flagged ${STARTUP_FLAGGED} (unknown owner ${STARTUP_UNKNOWN})"
+  log "Startup: inspected ${STARTUP_CHECKED} item(s); flagged ${STARTUP_FLAGGED} (unknown owner ${STARTUP_UNKNOWN})"
 }
 
 # Compatibility: some runners may call `run_startup` (without the `_module` suffix).

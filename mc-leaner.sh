@@ -3,6 +3,7 @@
 # Purpose: Parse arguments, assemble system context, and dispatch selected modules
 # Safety: Defaults to dry-run; any file moves require explicit `--apply`; no deletions
 
+# NOTE: Scripts run with strict mode for deterministic failures and auditability.
 set -euo pipefail
 
 # ----------------------------
@@ -213,8 +214,8 @@ summary_add "mode=$MODE apply=$APPLY backup=$BACKUP_DIR"
 # ----------------------------
 # Summary helpers
 # ----------------------------
-_now_epoch_s() { 
-  /bin/date +%s; 
+_now_epoch_s() {
+  /bin/date +%s
 }
 
 _elapsed_s() {
@@ -264,7 +265,6 @@ _summary_add_list() {
 }
 
 run_started_s="$(_now_epoch_s)"
-
 
 # ----------------------------
 # Dispatch by mode

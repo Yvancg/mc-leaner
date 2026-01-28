@@ -38,42 +38,44 @@
 #       - Heuristic name-only inference (e.g., leaf name under Caches/Logs), OR
 #       - Unknown
 
+ # NOTE: This module is inspection-only and uses best-effort probing.
+# It enables pipefail but avoids `set -euo pipefail` to prevent aborting on expected permission/absence errors.
 set -o pipefail
 
-# ----------------------------------------------------------------------------
-# Logging fallbacks
-# ----------------------------------------------------------------------------
+ # ----------------------------
+# Logging Fallbacks
+# ----------------------------
 
 if ! command -v log_info >/dev/null 2>&1; then
   log_info() {
-    # Fallback logger used when module is executed standalone.
+    # Purpose: Fallback logger when the module is executed standalone.
     printf '%s\n' "$*"
   }
 fi
 
 if ! command -v log_explain >/dev/null 2>&1; then
   log_explain() {
-    # Fallback explain logger used when module is executed standalone.
+    # Purpose: Fallback explain logger when the module is executed standalone.
     printf '[EXPLAIN] %s\n' "$*"
   }
 fi
 
-# ----------------------------------------------------------------------------
-# Explain helper
-# ----------------------------------------------------------------------------
+ # ----------------------------
+# Explain Helper
+# ----------------------------
 
 _disk_explain() {
+  # Purpose: Emit explain lines only when explain=true.
   # Usage: _disk_explain "message"
-  # Emits explain lines only when explain=true.
   local msg="$1"
   if _disk_is_true "${DISK_EXPLAIN:-false}"; then
     log_explain "$msg"
   fi
 }
 
-# ----------------------------------------------------------------------------
-# Small helpers
-# ----------------------------------------------------------------------------
+ # ----------------------------
+# Small Helpers
+# ----------------------------
 
 _disk_is_true() {
   case "${1:-}" in
@@ -83,7 +85,7 @@ _disk_is_true() {
 }
 
 _disk_du_kb() {
-  # Returns integer KB for a path. Suppress permission errors.
+  # Purpose: Return integer KB for a path (permission errors suppressed).
   local p="$1"
   if [[ -z "$p" || ! -e "$p" ]]; then
     echo 0
@@ -99,19 +101,19 @@ _disk_du_kb() {
 }
 
 _disk_kb_to_mb_round() {
-  # integer KB -> integer MB (rounded)
+  # Purpose: Convert integer KB to integer MB (rounded).
   local kb="${1:-0}"
   awk -v kb="$kb" 'BEGIN{ if(kb<=0){print 0; exit} printf("%d", int((kb/1024)+0.5)) }'
 }
 
 _disk_normalize() {
-  # lowercases, strips non-alnum
+  # Purpose: Normalize a token (lowercase, strip non-alphanumerics).
   echo "${1:-}" | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:]'
 }
 
-# ----------------------------------------------------------------------------
-# Attribution helpers
-# ----------------------------------------------------------------------------
+ # ----------------------------
+# Attribution Helpers
+# ----------------------------
 
 _disk_owner_from_inventory() {
   # Best-effort lookup against an inventory index file.
@@ -217,9 +219,9 @@ _disk_category_for_path() {
   esac
 }
 
-# ----------------------------------------------------------------------------
-# Output helpers
-# ----------------------------------------------------------------------------
+ # ----------------------------
+# Output Helpers
+# ----------------------------
 
 _disk_emit_item() {
   # Format:
@@ -233,9 +235,9 @@ _disk_emit_item() {
   printf 'DISK? %sMB | owner: %s | conf: %s | category: %s | path: %s\n' "$mb" "$owner" "$conf" "$cat" "$p"
 }
 
-# ----------------------------------------------------------------------------
+ # ----------------------------
 # Collectors
-# ----------------------------------------------------------------------------
+# ----------------------------
 
 _disk_collect_sizes() {
   # Writes: "mb<TAB>path" lines to the provided output file.
@@ -295,9 +297,9 @@ _disk_collect_sizes() {
   done
 }
 
-# ----------------------------------------------------------------------------
-# Entrypoint
-# ----------------------------------------------------------------------------
+ # ----------------------------
+# Module Entry Point
+# ----------------------------
 
 run_disk_module() {
   # Contract:
@@ -308,7 +310,10 @@ run_disk_module() {
   local explain="${4:-false}"
   local inventory_index_file="${5:-}"
 
-  # Reserved args for contract consistency (unused here).
+  # Inputs
+  log_info "Disk: mode=${mode} apply=${apply} backup_dir=${backup_dir} explain=${explain} inventory_index=${inventory_index_file:-<none>} (inspection-only; apply ignored)"
+
+  # Reserved args for contract consistency (unused by this inspection-only module).
   : "${mode}" "${backup_dir}"
 
   # Timing (best-effort wall clock duration for this module).

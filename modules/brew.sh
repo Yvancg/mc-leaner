@@ -5,11 +5,15 @@
 # Safety: read-only; does NOT run brew cleanup/uninstall/upgrade; no filesystem writes
 # Notes: best-effort parsing; macOS default bash 3.2 compatible
 
+
+# NOTE: Modules run with strict mode for deterministic failures and auditability.
 set -euo pipefail
 
 # ----------------------------
-# Summary buckets (printed at end)
+# Summary Buckets
 # ----------------------------
+# Purpose: Store end-of-run buckets for a stable summary.
+# Safety: In-memory only; no filesystem writes.
 BREW_LEAVES_LIST=()
 BREW_OUTDATED_UNPINNED=()
 BREW_OUTDATED_PINNED=()
@@ -18,12 +22,12 @@ BREW_CACHE_LINES=()        # human-readable cache summary lines
 BREW_FLAGGED_ITEMS=()      # actionable review items (end-of-run)
 
 # ----------------------------
-# Defensive: ensure explain_log exists
+# Defensive Checks
 # ----------------------------
 if ! type explain_log >/dev/null 2>&1; then
   explain_log() {
-    # Purpose: best-effort verbose logging when --explain is enabled
-    # Safety: logging only
+    # Purpose: Best-effort verbose logging when --explain is enabled.
+    # Safety: Logging only.
     if [[ "${EXPLAIN:-false}" == "true" ]]; then
       log "$@"
     fi
@@ -34,11 +38,10 @@ fi
 # Helpers
 # ----------------------------
 
-# Defensive: ensure tmpfile exists (mktemp wrapper)
 if ! type tmpfile >/dev/null 2>&1; then
   tmpfile() {
-    # Purpose: create a temp file path
-    # Safety: creates an empty temp file
+    # Purpose: Create a temp file path.
+    # Safety: Creates an empty temp file.
     mktemp -t mc-leaner.XXXXXX
   }
 fi
@@ -278,16 +281,19 @@ _brew_cache_downloads_summary() {
 }
 
 # ----------------------------
-# Entry point
+# Module Entry Point
 # ----------------------------
 run_brew_module() {
   # Args:
-  #  $1 apply (true/false)  [ignored; brew module is read-only in v1.3.0]
+  #  $1 apply (true/false)  [ignored; module is inspection-only]
   #  $2 backup dir          [ignored]
   #  $3 explain (true/false)
   local _apply="$1"
   local _backup_dir="$2"
   local explain="$3"
+
+  # Inputs
+  log "Homebrew: mode=brew-only apply=${_apply} backup_dir=${_backup_dir} explain=${explain} (read-only module; apply ignored)"
 
   EXPLAIN="$explain"
 

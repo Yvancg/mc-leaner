@@ -2,21 +2,14 @@
 # shellcheck shell=bash
 # mc-leaner: leftovers module (inspection-first)
 #
-# Purpose
-# - Identify user-level application leftovers (support files) for apps that no longer appear installed.
-# - Inspection-first: report findings; optional relocation only when --apply is used.
+# Purpose: Identify user-level application leftovers for apps that no longer appear installed.
+# Safety: Inspection-first; never deletes; relocation only in apply-mode with confirmation.
 #
 # Contract
 # - Entry point: run_leftovers_module <apply> <backup_dir> [explain] [inventory_file] [inventory_index_file]
-# - Never delete; relocation only (mv) to backup_dir.
 # - Prefer false negatives over false positives.
 #
-# Inputs
-# - apply: "true" or "false"
-# - backup_dir: destination for relocation when apply=true (reversible)
-# - explain: "true" or "false" (verbose reasoning)
-# - inventory_file: inventory.tsv produced by modules/inventory.sh
-# - inventory_index_file: inventory.index.tsv (optional; auto-built fallback if missing)
+# Inputs: apply, backup_dir, explain, inventory_file, inventory_index_file
 #
 # Outputs (exported globals)
 # - LEFTOVERS_FLAGGED_COUNT: number of LEFTOVER? findings emitted
@@ -34,25 +27,27 @@
 # Notes
 # - Owner/app inference is heuristic-based.
 # - Apple/system-owned containers are treated as protected and skipped.
+# - inventory_index_file is optional; a fallback index is built when missing.
 
+# NOTE: Modules run with strict mode for deterministic failures and auditability.
 set -euo pipefail
 
+# ----------------------------
+# Globals
+# ----------------------------
 
 # Global counter: number of LEFTOVER? findings emitted in this run.
 LEFTOVERS_FLAGGED_COUNT=0
-
 
 # Summary list of flagged items for end-of-run legibility.
 # Format: one string per item (pre-formatted for display).
 LEFTOVERS_FLAGGED_ITEMS=()
 
-#
 # Newline-delimited list of flagged identifiers (paths) for run-summary consumption.
 LEFTOVERS_FLAGGED_IDS_LIST=""
 
 # Wall clock duration (seconds, best-effort) for this module.
 LEFTOVERS_DUR_S=0
-
 
 # Summary list of move failures for end-of-run legibility (apply-mode only).
 # Format: one string per item (pre-formatted for display).
@@ -112,9 +107,8 @@ _leftovers_repo_root() {
   echo "$(cd "${here}/.." && pwd)"
 }
 
-
 _leftovers_expand_path() {
-  # Expand a limited set of tokens in a path string.
+  # Purpose: Expand a limited set of tokens in a path string.
   # Safety: avoid `eval` so allowlist parsing cannot execute arbitrary code.
   # Supported expansions:
   # - Leading `~`
@@ -132,14 +126,14 @@ _leftovers_expand_path() {
   printf '%s' "$raw"
 }
 
-# Confirm a move in a safe, dependency-tolerant way.
-# Uses ask_gui if available (preferred), otherwise falls back to a terminal prompt.
+# Purpose: Confirm a move in a safe, dependency-tolerant way.
+# Safety: No silent approvals; cancellation defaults to "No".
 _leftovers_confirm_move() {
   local p="$1"
 
-  # If the shared GUI prompt exists, use it.
-  if command -v ask_gui >/dev/null 2>&1; then
-    ask_gui "${p}"
+  # Prefer the shared confirmation helper when available.
+  if command -v ask_yes_no >/dev/null 2>&1; then
+    ask_yes_no $'Move this folder to backup?\n\n'"${p}"
     return $?
   fi
 
@@ -151,6 +145,10 @@ _leftovers_confirm_move() {
   read -r -p "Type 'yes' to confirm: " ans
   [[ "$ans" == "yes" ]]
 }
+
+# ----------------------------
+# Relocation Helpers
+# ----------------------------
 
 # Provide a targeted hint when macOS blocks moves from sandboxed locations.
 _leftovers_move_hint() {
@@ -172,7 +170,7 @@ _leftovers_move_to_backup() {
   local src="$1"
   local backup_dir="$2"
 
-  # This module must be run via mc-leaner.sh which sources lib/fs.sh.
+  # SAFETY: this module must be run via mc-leaner.sh which sources lib/fs.sh.
   if ! command -v move_attempt >/dev/null 2>&1; then
     log "Leftovers: cannot move (move_attempt not available). Run via mc-leaner.sh, not the module directly."
     LEFTOVERS_MOVE_FAILURES+=("${src} | failed: move_attempt not available")
@@ -240,9 +238,10 @@ _leftovers_move_to_backup() {
   esac
 }
 
-# -------------------------
-# Public entrypoint
-# -------------------------
+# ----------------------------
+# Public Entry Point
+# ----------------------------
+
 run_leftovers_module() {
   local apply="$1"
   local backup_dir="$2"
@@ -250,13 +249,16 @@ run_leftovers_module() {
   local inventory_file="${4:-}"
   local inventory_index_file="${5:-${INVENTORY_INDEX_FILE:-}}"
 
+  # Inputs
+  log "Leftovers: apply=${apply} backup_dir=${backup_dir} explain=${explain} inventory_file=${inventory_file:-<none>} inventory_index=${inventory_index_file:-<none>}"
+
   # Timing (best-effort wall clock duration for this module).
   local _leftovers_t0="" _leftovers_t1=""
   _leftovers_t0="$(/bin/date +%s 2>/dev/null || echo '')"
   LEFTOVERS_DUR_S=0
 
   _leftovers_finish_timing() {
-    # Must be safe under `set -u` and when invoked on early returns.
+    # SAFETY: must be safe under `set -u` and when invoked on early returns.
     _leftovers_t1="$(/bin/date +%s 2>/dev/null || echo '')"
     if [[ -n "${_leftovers_t0:-}" && -n "${_leftovers_t1:-}" ]]; then
       LEFTOVERS_DUR_S=$((_leftovers_t1 - _leftovers_t0))
@@ -401,9 +403,9 @@ run_leftovers_module() {
   _leftovers_summary_emit
 }
 
-# -------------------------
-# Internal helpers
-# -------------------------
+# ----------------------------
+# Internal Helpers
+# ----------------------------
 
 _leftovers_scan_target() {
   local target_dir="$1"
@@ -440,9 +442,9 @@ _leftovers_scan_target() {
   if [[ -n "$allowlist_file" && -f "$allowlist_file" ]]; then
     allowlist_norm_file="$(mktemp -t mcleaner_leftovers_allowlist.XXXXXX)"
     while IFS= read -r line || [[ -n "$line" ]]; do
-      # strip comments
+      # Purpose: Strip comments.
       line="${line%%#*}"
-      # trim spaces
+      # Purpose: Trim whitespace.
       line="$(echo "$line" | awk '{$1=$1;print}')"
       [[ -z "$line" ]] && continue
 

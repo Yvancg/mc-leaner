@@ -4,18 +4,31 @@
 # Purpose: identify large log files and log directories (user + system)
 # Safety: dry-run by default; optional move-to-backup when --apply is used
 
+
+# NOTE: Modules run with strict mode for deterministic failures and auditability.
 set -euo pipefail
 
+
 # ----------------------------
-# Defensive: ensure explain_log exists
+# Defensive Checks
 # ----------------------------
+# Purpose: Provide safe fallbacks when shared helpers are not loaded.
+# Safety: Logging and temp-file helpers only; must not change inspection or cleanup behavior.
 if ! type explain_log >/dev/null 2>&1; then
   explain_log() {
-    # Purpose: best-effort verbose logging when --explain is enabled
-    # Safety: logging only
+    # Purpose: Best-effort verbose logging when --explain is enabled.
+    # Safety: Logging only.
     if [[ "${EXPLAIN:-false}" == "true" ]]; then
       log "$@"
     fi
+  }
+fi
+
+if ! type tmpfile >/dev/null 2>&1; then
+  tmpfile() {
+    # Purpose: Create a temporary file path.
+    # Safety: Returns a path only; caller owns content.
+    mktemp -t mcleaner.XXXXXX 2>/dev/null || mktemp 2>/dev/null
   }
 fi
 
@@ -122,6 +135,13 @@ _logs_confirm_move() {
   #   2 = could not prompt (non-interactive / no tty)
   local p="$1"
 
+  if [[ "${NO_GUI:-false}" == "false" ]] && command -v ask_yes_no >/dev/null 2>&1; then
+    if ask_yes_no $'Move this log item to backup?\n\n'"${p}"; then
+      return 0
+    fi
+    return 1
+  fi
+
   if [[ "${NO_GUI:-false}" == "false" ]] && type ask_gui >/dev/null 2>&1; then
     if ask_gui "$p"; then
       return 0
@@ -192,19 +212,20 @@ _logs_move_to_backup() {
   return 0
 }
 
+#
 # ----------------------------
-# Entry point
+# Module Entry Point
 # ----------------------------
 run_logs_module() {
-  # Args:
-  #  $1 apply (true/false)
-  #  $2 backup dir
-  #  $3 explain (true/false)
-  #  $4 threshold MB (integer)
+  # Contract:
+  #   run_logs_module <apply> <backup_dir> <explain> <threshold_mb>
   local apply="$1"
   local backup_dir="$2"
   local explain="$3"
   local threshold_mb="$4"
+
+  # Inputs
+  log "Logs: apply=${apply} backup_dir=${backup_dir} explain=${explain} threshold_mb=${threshold_mb:-<none>}"
 
   # Timing (best-effort wall clock duration for this module).
   local _logs_t0="" _logs_t1=""
@@ -212,15 +233,17 @@ run_logs_module() {
   LOGS_DUR_S=0
 
   _logs_finish_timing() {
-    # Must be safe under `set -u` and when invoked on early returns.
+    # SAFETY: must be safe under `set -u` and when invoked on early returns.
     _logs_t1="$(/bin/date +%s 2>/dev/null || echo '')"
     if [[ -n "${_logs_t0:-}" && -n "${_logs_t1:-}" ]]; then
       LOGS_DUR_S=$((_logs_t1 - _logs_t0))
     fi
+    EXPLAIN="${_logs_prev_explain:-false}"
   }
   trap _logs_finish_timing RETURN
 
-  EXPLAIN="$explain"
+  local _logs_prev_explain="${EXPLAIN:-false}"
+  EXPLAIN="${explain}"
 
   # End-of-run contract arrays
   local -a flagged_items=()

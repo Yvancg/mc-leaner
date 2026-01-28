@@ -4,18 +4,23 @@
 # Purpose: Heuristically identify unmanaged binaries in /usr/local/bin (using Inventory to reduce false positives) and optionally relocate them to backups
 # Safety: Defaults to dry-run; never deletes; moves require explicit `--apply` and per-item confirmation
 
+
+# NOTE: Modules run with strict mode for deterministic failures and auditability.
 set -euo pipefail
 
 # ----------------------------
-# Module entry point
+# Module Entry Point
 # ----------------------------
 
 run_bins_module() {
   local mode="$1" apply="$2" backup_dir="$3"
   local inventory_index_file="${4:-}"
 
+  # Inputs
+  log "Bins: mode=${mode} apply=${apply} backup_dir=${backup_dir} inventory_index=${inventory_index_file:-<none>}"
+
   # ----------------------------
-  # Target directory
+  # Target Directory
   # ----------------------------
   local dir="/usr/local/bin"
   if [[ ! -d "$dir" ]]; then
@@ -24,7 +29,7 @@ run_bins_module() {
   fi
 
   # ----------------------------
-  # Inventory (optional): build membership set (file of keys)
+  # Inventory (optional): build a key membership set to reduce false positives.
   local inv_keys_file=""
   if [[ -n "$inventory_index_file" && -s "$inventory_index_file" ]]; then
     inv_keys_file="$(mktemp -t mc-leaner_bins_invkeys.XXXXXX)"
@@ -33,21 +38,20 @@ run_bins_module() {
     trap 'rm -f "$inv_keys_file" 2>/dev/null || true' RETURN
   fi
 
-  # Build a fast membership map for keys (awk associative array)
-  # Note: avoids O(N) grep per binary when /usr/local/bin is large.
+  # Fast key lookup via awk (avoids O(N) grep per binary when /usr/local/bin is large).
   local inv_keys_map=""
   if [[ -n "$inv_keys_file" && -s "$inv_keys_file" ]]; then
     inv_keys_map="$inv_keys_file"
   fi
 
-  # Fast key lookup via awk map. Returns 0 (true) if key exists.
+  # Returns 0 (true) when the inventory key exists.
   inv_has_key() {
     local k="$1"
     [[ -n "$inv_keys_map" && -s "$inv_keys_map" ]] || return 1
     awk -v k="$k" 'BEGIN{found=0} $0==k{found=1; exit} END{exit(found?0:1)}' "$inv_keys_map" 2>/dev/null
   }
   # ----------------------------
-  # Heuristic scan
+  # Heuristic Scan
   # ----------------------------
   local found=0
   local flagged_count=0
@@ -110,8 +114,8 @@ run_bins_module() {
         ;;
     esac
 
-    # Skip binaries that are known to be installed (brew formula/cask keys and app-derived keys)
-    # Note: This is a best-effort guard; later we can add pkg receipts vs standalone binary detection.
+    # Skip binaries that are known to be installed (best-effort inventory guard).
+    # WARNING: inventory keys are not a full package receipt system.
     if inv_has_key "$base"; then
       log "SKIP (inventory match): $bin_path (key=$base)"
       continue
@@ -122,7 +126,7 @@ run_bins_module() {
     flagged_count=$((flagged_count + 1))
     flagged_items+=("${bin_path}")
 
-    # SAFETY: only move items when explicitly running in clean mode with --apply
+    # SAFETY: move only in clean mode with --apply and per-item confirmation.
     if [[ "$mode" == "clean" && "$apply" == "true" ]]; then
       if ask_yes_no "Orphaned binary detected:\n$bin_path\n\nMove to backup folder?"; then
         local move_out=""

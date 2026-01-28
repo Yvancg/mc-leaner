@@ -3,16 +3,22 @@
 # Purpose: Provide small, auditable filesystem primitives used by modules (create backup dirs, move files safely)
 # Safety: Never deletes; uses `sudo` only when required to relocate protected files
 
-set -euo pipefail
+
+# NOTE: This library avoids setting shell-global strict mode.
+# The entrypoint (mc-leaner.sh) is responsible for `set -euo pipefail`.
 
 # ----------------------------
-# Directory helpers
+# Directory Helpers
 # ----------------------------
 
-ensure_dir() { mkdir -p "$1"; }
+# Purpose: Ensure a directory exists.
+# Safety: Uses mkdir -p; no deletions or permission escalation.
+ensure_dir() {
+  mkdir -p "$1"
+}
 
 # ----------------------------
-# Safe relocation
+# Safe Relocation
 # ----------------------------
 
 # Purpose: Move a single file/dir into a backup directory, preserving its name
@@ -37,7 +43,7 @@ safe_move() {
   local parent
   parent="$(dirname "$src")"
 
-  # Attempt without sudo first; retry with sudo only for permission-style failures.
+  # SAFETY: try non-sudo first; escalate only for permission-style failures.
   local err rc
   err=""
   set +e
@@ -51,7 +57,7 @@ safe_move() {
   set -e
 
   if [[ $rc -ne 0 ]]; then
-    # If we tried non-sudo and got a permission-like error, retry with sudo.
+    # SAFETY: retry with sudo only when the first attempt was non-sudo and the error is permission-like.
     if [[ -w "$parent" ]] && { [[ "$err" == *"Operation not permitted"* ]] || [[ "$err" == *"Permission denied"* ]]; }; then
       sudo mv "$src" "$dst"
     else
@@ -64,7 +70,7 @@ safe_move() {
 }
 
 # ----------------------------
-# Shared move/error contract
+# Move attempt contract
 # ----------------------------
 
 # Contract fields for the last move attempt. Modules can read these.
@@ -73,7 +79,14 @@ MOVE_LAST_CODE=""     # permission|busy|not_found|exists|unknown
 MOVE_LAST_MESSAGE=""  # human-readable error or note
 MOVE_LAST_DEST=""     # destination path when moved
 
-# Purpose: Classify common mv errors into stable codes.
+#
+# Contract fields for the last move attempt. Modules can read these.
+MOVE_LAST_STATUS=""   # moved|failed|skipped
+MOVE_LAST_CODE=""     # permission|busy|not_found|exists|unknown
+MOVE_LAST_MESSAGE=""  # human-readable error or note
+MOVE_LAST_DEST=""     # destination path when moved
+
+# Purpose: Classify common mv errors into stable, user-facing codes.
 classify_move_error() {
   local msg="$1"
   MOVE_LAST_CODE="unknown"

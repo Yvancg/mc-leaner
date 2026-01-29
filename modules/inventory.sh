@@ -171,6 +171,18 @@ _inventory_add_index() {
   name="$(_inventory_sanitize_tsv "$name")"
   app_path="$(_inventory_sanitize_tsv "$app_path")"
 
+  # Defensive: `name` must be human-readable. If it accidentally carries a path key,
+  # normalize it back to an app-like display name.
+  if [[ "$name" == path:* ]]; then
+    local p_from_name base_from_name
+    p_from_name="${name#path:}"
+    base_from_name="$(basename "$p_from_name" 2>/dev/null || true)"
+    base_from_name="${base_from_name%.app}"
+    if [[ -n "$base_from_name" ]]; then
+      name="$base_from_name"
+    fi
+  fi
+
   if [[ -z "$key" ]]; then
     return 0
   fi

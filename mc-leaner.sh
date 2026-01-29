@@ -274,6 +274,26 @@ _insight_log() {
   log "INSIGHT: $*"
 }
 
+_summary_mb_to_human() {
+  # Usage: _summary_mb_to_human <mb_int>
+  # Purpose: Small helper for insight lines (human-readable size from MB).
+  # Output: e.g. "519MB" or "1.6GB"
+  local mb_raw="${1:-0}"
+
+  if [[ -z "$mb_raw" || ! "$mb_raw" =~ ^[0-9]+$ ]]; then
+    echo "0MB"
+    return 0
+  fi
+
+  if (( mb_raw >= 1024 )); then
+    # One decimal place for GB.
+    /usr/bin/awk -v mb="$mb_raw" 'BEGIN{printf "%.1fGB", mb/1024.0}'
+    return 0
+  fi
+
+  echo "${mb_raw}MB"
+}
+
 _extract_service_owner_persistence_map() {
   # Input: SERVICE_RECORDS_LIST (lines: scope=... | persistence=... | owner=... | label=...)
   # Output: lines "owner\tpersistence" (may include duplicates)
@@ -286,6 +306,12 @@ _extract_service_owner_persistence_map() {
     persistence="$(printf '%s' "$line" | sed -n 's/.*persistence=\([^|]*\) |.*/\1/p' | sed 's/^ *//;s/ *$//')"
 
     [[ -n "$owner" && -n "$persistence" ]] || continue
+
+    # Correlation insights are persistence-backed: only boot/login (exclude on-demand).
+    if [[ "$persistence" == "on-demand" ]]; then
+      continue
+    fi
+
     printf '%s\t%s\n' "$owner" "$persistence"
   done <<<"${SERVICE_RECORDS_LIST:-}"
 }
@@ -295,30 +321,38 @@ _emit_disk_service_insights() {
   # Constraints:
   # - Only flagged disk items (DISK_FLAGGED_RECORDS_LIST)
   # - Only inventory-backed owners (skip Unknown)
-  # - One persistence per owner (first seen)
+  # - One persistence per owner (prefer boot over login)
   local svc_map disk_line owner persistence size_h
+  local seen_owners
+  seen_owners=$'\n'
 
   [[ -n "${DISK_FLAGGED_RECORDS_LIST:-}" ]] || return 0
   [[ -n "${SERVICE_RECORDS_LIST:-}" ]] || return 0
 
-  # owner -> first-seen persistence
-  svc_map="$(_extract_service_owner_persistence_map | /usr/bin/awk -F '\t' '!seen[$1]++{print $1"\t"$2}')"
+  # Prefer boot over login when multiple persistence values exist for the same owner.
+  svc_map="$(_extract_service_owner_persistence_map | /usr/bin/awk -F '\t' '
+    function rank(p){return (p=="boot"?2:(p=="login"?1:0))}
+    {
+      r=rank($2)
+      if (!($1 in best) || r>best[$1]) {best[$1]=r; val[$1]=$2}
+    }
+    END{for (k in val) print k"\t"val[k]}
+  ')"
   [[ -n "$svc_map" ]] || return 0
 
-  while IFS= read -r disk_line; do
-    [[ -n "$disk_line" ]] || continue
-
-    owner="$(printf '%s' "$disk_line" | sed -n 's/.*| owner=\([^|]*\)$/\1/p' | sed 's/^ *//;s/ *$//')"
-    size_h="$(printf '%s' "$disk_line" | sed -n 's/.*size_h=\([^|]*\) |.*/\1/p' | sed 's/^ *//;s/ *$//')"
-
-    [[ -n "$owner" && "$owner" != "Unknown" ]] || continue
+  while IFS=$'\t' read -r owner mb path; do
+    [[ -n "${owner}" && -n "${path}" ]] || continue
+    [[ "${owner}" != "Unknown" ]] || continue
+    # Dedupe insights by owner (Bash 3.2-safe; no associative arrays).
+    if [[ "$seen_owners" == *$'\n'"${owner}"$'\n'* ]]; then
+      continue
+    fi
+    seen_owners+="${owner}"$'\n'
 
     persistence="$(printf '%s\n' "$svc_map" | /usr/bin/awk -F '\t' -v o="$owner" '$1==o{print $2; exit}')"
     [[ -n "$persistence" ]] || continue
 
-    if [[ -z "$size_h" || "$size_h" == "-" ]]; then
-      size_h="(large disk use)"
-    fi
+    size_h="$(_summary_mb_to_human "${mb:-0}")"
 
     _insight_log "${owner} uses ${size_h} and runs at ${persistence}"
   done <<<"${DISK_FLAGGED_RECORDS_LIST}"

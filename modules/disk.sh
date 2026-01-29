@@ -50,14 +50,14 @@ set -o pipefail
 if ! command -v log_info >/dev/null 2>&1; then
   log_info() {
     # Purpose: Fallback logger when the module is executed standalone.
-    printf '%s\n' "$*"
+    printf '%s\n' "$*" 2>/dev/null || true
   }
 fi
 
 if ! command -v log_explain >/dev/null 2>&1; then
   log_explain() {
     # Purpose: Fallback explain logger when the module is executed standalone.
-    printf '[EXPLAIN] %s\n' "$*"
+    printf '[EXPLAIN] %s\n' "$*" 2>/dev/null || true
   }
 fi
 
@@ -149,6 +149,15 @@ _disk_owner_from_inventory() {
   line="$(LC_ALL=C grep -i -m 1 -E "(^|[^a-z0-9])${token}([^a-z0-9]|$)" "$inventory_index_file" 2>/dev/null || true)"
   [[ -z "$line" ]] && return 1
 
+  # Inventory index format (v2.0+): key<TAB>name<TAB>source<TAB>path
+  # Prefer the name (column 2) as the owner for correlation and readability.
+  local tsv_name
+  tsv_name="$(printf '%s\n' "$line" | /usr/bin/awk -F '\t' 'NF>=2{print $2; exit}' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+  if [[ -n "$tsv_name" ]]; then
+    printf '%s' "$tsv_name"
+    return 0
+  fi
+
   # Prefer an "owner:" segment when present.
   local owner
   owner="$(echo "$line" | sed -nE 's/.*owner:[[:space:]]*([^|,]+).*/\1/p' | head -n 1 | sed -E 's/[[:space:]]+$//')"
@@ -212,10 +221,40 @@ _disk_infer_owner() {
     fi
   fi
 
-  # 5) Caches/Logs by leaf name
+  # 5) Caches/Logs
+  # ShipIt: common updater helper folder names often end with `.ShipIt`.
+  # Prefer attributing them to the parent app when we can do so explicitly.
   if [[ "$p" == *"/Library/Caches/"* || "$p" == *"/Library/Logs/"* ]]; then
     local leaf
     leaf="$(basename "$p")"
+
+    # ShipIt mapping (conservative):
+    # - Exact known helpers (explicit)
+    # - Or suffix `.ShipIt` where stripping the suffix resolves via inventory.
+    if [[ -n "$leaf" && "$leaf" == *.ShipIt ]]; then
+      local shipit_base
+      shipit_base="${leaf%.ShipIt}"
+
+      # Exact explicit mappings.
+      case "$leaf" in
+        com.microsoft.VSCode.ShipIt)
+          printf '%s|%s' "Visual Studio Code" "medium"
+          return 0
+          ;;
+      esac
+
+      # Inventory-backed mapping by stripped base (medium confidence: suffix heuristic, but owner is inventory-derived).
+      if [[ -n "$shipit_base" ]]; then
+        local shipit_owner
+        shipit_owner="$(_disk_owner_from_inventory "$inventory_index_file" "$shipit_base" || true)"
+        if [[ -n "$shipit_owner" ]]; then
+          printf '%s|%s' "$shipit_owner" "medium"
+          return 0
+        fi
+      fi
+    fi
+
+    # Fallback: leaf name only.
     if [[ -n "$leaf" ]]; then
       printf '%s|%s' "$leaf" "low"
       return 0
@@ -249,7 +288,7 @@ _disk_emit_item() {
   local cat="$4"
   local p="$5"
 
-  printf 'DISK? %sMB | owner: %s | conf: %s | category: %s | path: %s\n' "$mb" "$owner" "$conf" "$cat" "$p"
+  log_info "DISK? ${mb}MB | owner: ${owner} | conf: ${conf} | category: ${cat} | path: ${p}"
 }
 
  # ----------------------------
@@ -354,7 +393,8 @@ run_disk_module() {
   DISK_THRESHOLD_MB="${min_mb}"
   DISK_TOP_N="${top_n}"
 
-  # Newline-delimited flagged records for v2.3.0 correlation (printed items only).
+  # v2.3.0 correlation surface (printed items only): owner<TAB>mb<TAB>path (one per line).
+  DISK_FLAGGED_RECORDS_TSV=""
   DISK_FLAGGED_RECORDS_LIST=""
 
   local tmp
@@ -402,11 +442,7 @@ run_disk_module() {
 
       _disk_emit_item "${mb}" "${owner}" "${conf}" "${cat}" "${p}"
 
-      local size_h size_bytes
-      size_h="$(_disk_mb_to_human "${mb}")"
-      size_bytes=$((mb * 1024 * 1024))
-
-      DISK_FLAGGED_RECORDS_LIST+="path=${p} | size_bytes=${size_bytes} | size_h=${size_h} | owner=${owner}"$'\n'
+      DISK_FLAGGED_RECORDS_TSV+="${owner}"$'\t'"${mb}"$'\t'"${p}"$'\n'
 
       printed=$((printed + 1))
     fi
@@ -421,7 +457,7 @@ run_disk_module() {
   # Export flagged identifiers list for run summary consumption.
   DISK_FLAGGED_IDS_LIST="$(printf '%s\n' "${_disk_flagged_ids[@]}")"
 
-  DISK_FLAGGED_RECORDS_LIST="$(printf '%s' "${DISK_FLAGGED_RECORDS_LIST}" | sed '$s/\n$//')"
+  DISK_FLAGGED_RECORDS_LIST="$(printf '%s' "${DISK_FLAGGED_RECORDS_TSV}" | sed '$s/\n$//')"
 
   _disk_t1="$(/bin/date +%s 2>/dev/null || echo '')"
   if [[ -n "${_disk_t0}" && -n "${_disk_t1}" ]]; then

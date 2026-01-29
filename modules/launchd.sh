@@ -238,6 +238,32 @@ run_launchd_module() {
     echo "Unknown"
   }
 
+  _launchd_label_prefix_owner() {
+    # Purpose: Conservative static owner attribution when inventory cannot resolve a launchd label.
+    # Safety: Explicit mapping only (no fuzzy matching).
+    local label="$1"
+
+    case "$label" in
+      com.dropbox.*)
+        echo "Dropbox"
+        return 0
+        ;;
+      us.zoom.*)
+        echo "Zoom"
+        return 0
+        ;;
+      com.google.keystone.*|com.google.GoogleUpdater.*)
+        echo "Google Keystone"
+        return 0
+        ;;
+      *)
+        :
+        ;;
+    esac
+
+    echo ""
+  }
+
   _launchd_label_matches_inventory() {
     # Purpose: reduce false positives by skipping launchd labels that map to installed software
     # Strategy (conservative):
@@ -346,6 +372,14 @@ run_launchd_module() {
       esac
 
       owner="$(_launchd_inventory_owner "$label")"
+      if [[ "$owner" == "Unknown" ]]; then
+        local mapped_owner
+        mapped_owner="$(_launchd_label_prefix_owner "$label")"
+        if [[ -n "$mapped_owner" ]]; then
+          owner="$mapped_owner"
+          explain_log "Launchd owner: label-prefix-map | label=${label} | owner=${owner}"
+        fi
+      fi
 
       service_emit_record "$scope" "$persistence" "$owner" "$label"
 

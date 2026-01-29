@@ -140,17 +140,14 @@ NF_CLOUD_STORAGE_OWNERS=(
 )
 
 NF_SYNC_CLIENT_OWNERS=(
-  "Google"
-  "Microsoft"
   "Mozilla"
 )
 
 NF_TELEMETRY_UPDATE_OWNERS=(
-  "Google"
-  "Microsoft"
   "Adobe"
   "Dropbox"
   "Zoom"
+  "Google Keystone"
 )
 
 NF_REMOTE_ACCESS_OWNERS=(
@@ -162,18 +159,8 @@ NF_REMOTE_ACCESS_OWNERS=(
 )
 
 # Exact label allowlist for known network-facing services.
-# Keep this list small and explicit.
+# Intentionally empty; fallback only.
 NF_LABEL_ALLOWLIST=(
-  "us.zoom.updater.login.check"
-  "us.zoom.updater"
-  "us.zoom.ZoomDaemon"
-  "com.dropbox.DropboxUpdater.wake"
-  "com.dropbox.dropboxmacupdate.xpcservice"
-  "com.dropbox.dropboxmacupdate.agent"
-  "com.google.keystone.xpcservice"
-  "com.google.keystone.agent"
-  "com.google.keystone.daemon"
-  "com.google.GoogleUpdater.wake.system"
 )
 
 service_network_facing_classify() {
@@ -182,44 +169,45 @@ service_network_facing_classify() {
   # Output (tab-delimited):
   #   <true|false>\t<rule_id|->\t<reason|->
   #
-  # Policy:
-  # - Default false.
-  # - Apply owner-class rules only when owner is known (not Unknown).
-  # - Apply label allowlist regardless of owner.
+  # Owner-first: if we have a known owner, prefer explicit owner-class rules.
   local owner="${1:-Unknown}"
   local label="${2:-}"
 
-  if _service_label_in_list "$label" "${NF_LABEL_ALLOWLIST[@]:-}"; then
-    printf 'true\tNF_LABEL_ALLOWLIST\tlabel_allowlist_match'
-    return 0
-  fi
+  # Owner-first: if we have a known owner, prefer explicit owner-class rules.
+  if [[ -n "$owner" && "$owner" != "Unknown" ]]; then
+    if _service_owner_in_list "$owner" "${NF_VPN_OWNERS[@]:-}"; then
+      printf 'true\tNF_VPN_OWNER\tvpn_vendor_match'
+      return 0
+    fi
 
-  if [[ -z "$owner" || "$owner" == "Unknown" ]]; then
+    if _service_owner_in_list "$owner" "${NF_CLOUD_STORAGE_OWNERS[@]:-}"; then
+      printf 'true\tNF_CLOUD_STORAGE_OWNER\tcloud_storage_vendor_match'
+      return 0
+    fi
+
+    if _service_owner_in_list "$owner" "${NF_SYNC_CLIENT_OWNERS[@]:-}"; then
+      printf 'true\tNF_SYNC_CLIENT_OWNER\tsync_client_vendor_match'
+      return 0
+    fi
+
+    if _service_owner_in_list "$owner" "${NF_TELEMETRY_UPDATE_OWNERS[@]:-}"; then
+      printf 'true\tNF_TELEMETRY_UPDATE_OWNER\ttelemetry_update_vendor_match'
+      return 0
+    fi
+
+    if _service_owner_in_list "$owner" "${NF_REMOTE_ACCESS_OWNERS[@]:-}"; then
+      printf 'true\tNF_REMOTE_ACCESS_OWNER\tremote_access_vendor_match'
+      return 0
+    fi
+
+    # Known owner but no explicit class match.
     printf 'false\t-\t-'
     return 0
   fi
 
-  if _service_owner_in_list "$owner" "${NF_VPN_OWNERS[@]:-}"; then
-    printf 'true\tNF_VPN_OWNER\tvpn_vendor_match'
-    return 0
-  fi
-  if _service_owner_in_list "$owner" "${NF_CLOUD_STORAGE_OWNERS[@]:-}"; then
-    printf 'true\tNF_CLOUD_STORAGE_OWNER\tcloud_storage_vendor_match'
-    return 0
-  fi
-
-  if _service_owner_in_list "$owner" "${NF_SYNC_CLIENT_OWNERS[@]:-}"; then
-    printf 'true\tNF_SYNC_CLIENT_OWNER\tsync_client_vendor_match'
-    return 0
-  fi
-
-  if _service_owner_in_list "$owner" "${NF_TELEMETRY_UPDATE_OWNERS[@]:-}"; then
-    printf 'true\tNF_TELEMETRY_UPDATE_OWNER\ttelemetry_update_vendor_match'
-    return 0
-  fi
-
-  if _service_owner_in_list "$owner" "${NF_REMOTE_ACCESS_OWNERS[@]:-}"; then
-    printf 'true\tNF_REMOTE_ACCESS_OWNER\tremote_access_vendor_match'
+  # Owner unknown: allow explicit label allowlist as the only path to true.
+  if _service_label_in_list "$label" "${NF_LABEL_ALLOWLIST[@]:-}"; then
+    printf 'true\tNF_LABEL_ALLOWLIST\tlabel_allowlist_match'
     return 0
   fi
 

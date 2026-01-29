@@ -57,7 +57,8 @@ set -euo pipefail
 
 if ! command -v log >/dev/null 2>&1; then
   log() {
-    printf '%s\n' "$*"
+    # Ignore EPIPE when downstream closes early (e.g., `rg -m`).
+    printf '%s\n' "$*" 2>/dev/null || true
   }
 fi
 
@@ -108,6 +109,7 @@ _startup_explain() {
 # Attribution helpers
 # -----------------------------------------------------------------------------
 
+
 _startup_is_apple_owner() {
   # Apple-owned identifiers (best-effort).
   # Keep this strict to avoid mis-attributing third-party items that merely contain "apple".
@@ -115,6 +117,34 @@ _startup_is_apple_owner() {
   [[ "${label}" == com.apple.* ]] && return 0
   [[ "${label}" == group.com.apple.* ]] && return 0
   return 1
+}
+
+# Conservative static owner attribution for known label prefixes (no fuzzy matching)
+_startup_label_prefix_owner() {
+  # Purpose: Conservative static owner attribution when inventory cannot resolve a label.
+  # Safety: Explicit mapping only (no fuzzy matching). Intended to reduce Unknown for common vendors.
+  # Output: "<owner>|label-prefix-map|medium" or empty string when no match.
+  local label="$1"
+
+  case "$label" in
+    com.dropbox.*)
+      echo "Dropbox|label-prefix-map|medium"
+      return 0
+      ;;
+    us.zoom.*)
+      echo "Zoom|label-prefix-map|medium"
+      return 0
+      ;;
+    com.google.keystone.*|com.google.GoogleUpdater.*)
+      echo "Google Keystone|label-prefix-map|medium"
+      return 0
+      ;;
+    *)
+      :
+      ;;
+  esac
+
+  echo ""
 }
 
 _startup_plist_extract_raw() {
@@ -130,6 +160,48 @@ _startup_plist_extract_xml() {
   # Returns an XML representation (useful for dict/array/bool presence checks), otherwise empty.
   local plist="$1" keypath="$2"
   /usr/bin/plutil -extract "${keypath}" xml1 -o - "${plist}" 2>/dev/null || true
+}
+
+# Conservative full-plist XML fallback helpers
+_startup_plist_to_xml() {
+  # Usage: _startup_plist_to_xml <plist>
+  # Purpose: Convert a plist to XML for fallback parsing.
+  # Safety: Read-only.
+  local plist="$1"
+  /usr/bin/plutil -convert xml1 -o - "${plist}" 2>/dev/null || true
+}
+
+_startup_plist_xml_find_string_after_key() {
+  # Usage: _startup_plist_xml_find_string_after_key <plist> <key>
+  # Purpose: Best-effort: find the first <string> following a <key>NAME</key> anywhere in the plist XML.
+  # Safety: Read-only; heuristic.
+  local plist="$1" key="$2"
+  local xml=""
+
+  xml="$(_startup_plist_to_xml "${plist}")"
+  [[ -n "$xml" ]] || return 0
+
+  # Search for: <key>KEY</key> ... <string>VALUE</string>
+  # Take the first match.
+  printf '%s' "$xml" | sed -n "s/.*<key>${key}<\/key>[[:space:]]*<string>\([^<]*\)<\/string>.*/\1/p" | head -n 1
+}
+
+_startup_plist_xml_find_first_programarguments_string() {
+  # Usage: _startup_plist_xml_find_first_programarguments_string <plist>
+  # Purpose: Find the first <string> within the first ProgramArguments <array> anywhere in the plist.
+  # Safety: Read-only; heuristic.
+  local plist="$1"
+  local xml=""
+
+  xml="$(_startup_plist_to_xml "${plist}")"
+  [[ -n "$xml" ]] || return 0
+
+  # Extract the first ProgramArguments array block, then take its first <string>.
+  printf '%s' "$xml" \
+    | tr '\n' ' ' \
+    | sed -n 's/.*<key>ProgramArguments<\/key>[[:space:]]*<array>\(.*\)<\/array>.*/\1/p' \
+    | sed -n 's/.*<string>\([^<]*\)<\/string>.*/\1/p' \
+    | head -n 1
 }
 
 # Extract the first string from an array key via XML (for ProgramArguments etc).
@@ -221,6 +293,25 @@ _startup_plist_exec() {
     return 0
   fi
 
+  # Final fallback: search anywhere in the plist XML (handles nested dicts seen in some agents/XPC services).
+  program="$(_startup_plist_xml_find_string_after_key "${plist}" Program | sed 's/^\s*//;s/\s*$//')"
+  if [[ -n "${program}" ]]; then
+    echo "${program}"
+    return 0
+  fi
+
+  argv0="$(_startup_plist_xml_find_first_programarguments_string "${plist}" | sed 's/^\s*//;s/\s*$//')"
+  if [[ -n "${argv0}" ]]; then
+    echo "${argv0}"
+    return 0
+  fi
+
+  program="$(_startup_plist_xml_find_string_after_key "${plist}" ServiceExecutable | sed 's/^\s*//;s/\s*$//')"
+  if [[ -n "${program}" ]]; then
+    echo "${program}"
+    return 0
+  fi
+
   echo ""
 }
 
@@ -267,6 +358,14 @@ _startup_inventory_owner() {
       echo "Homebrew (${owner})|brew-service|medium"
       return 0
     fi
+  fi
+
+  # Fallback: explicit label-prefix owner map (static; not inventory-backed).
+  local mapped=""
+  mapped="$(_startup_label_prefix_owner "${label}")"
+  if [[ -n "$mapped" ]]; then
+    echo "$mapped"
+    return 0
   fi
 
   echo "Unknown|none|low"
@@ -500,6 +599,20 @@ APPLESCRIPT
     owner="${owner_meta%%|*}"
     how="${owner_meta#*|}"; how="${how%%|*}"
     conf="${owner_meta##*|}"
+
+    # Conservative fallback for LoginItems: exact label mapping (explicit only).
+    if [[ "${owner}" == "Unknown" ]]; then
+      case "${label}" in
+        Dropbox)
+          owner="Dropbox"
+          how="label-exact-map"
+          conf="medium"
+          ;;
+        *)
+          :
+          ;;
+      esac
+    fi
 
     local impact=""
     impact="$(_startup_infer_impact "${timing}" "${label}" "${exec_path}" "${owner}" "${conf}")"

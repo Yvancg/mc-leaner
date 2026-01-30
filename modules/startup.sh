@@ -77,11 +77,18 @@ if ! command -v explain_log >/dev/null 2>&1; then
   }
 fi
 
+
 # Ensure shared SERVICE? emitter is available (label-deduped, network-facing heuristics).
 if ! command -v service_emit_record >/dev/null 2>&1; then
   _startup_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   # shellcheck source=/dev/null
   [[ -f "${_startup_dir}/../lib/utils.sh" ]] && source "${_startup_dir}/../lib/utils.sh"
+fi
+
+# Final fallback: if service_emit_record is still unavailable, define a no-op.
+# Safety: preserves inspection output (STARTUP?) while skipping SERVICE? emission.
+if ! command -v service_emit_record >/dev/null 2>&1; then
+  service_emit_record() { return 0; }
 fi
 
 # ----------------------------
@@ -656,6 +663,13 @@ run_startup_module() {
 
   : "${mode}" "${backup_dir}" "${inventory_index}" # reserved for contract consistency
 
+  # Inventory index (if provided by runner) for attribution helpers.
+  local _startup_prev_inventory_index_file="${INVENTORY_INDEX_FILE:-}"
+  if [[ -n "${inventory_index}" ]]; then
+    INVENTORY_INDEX_FILE="${inventory_index}"
+    export INVENTORY_INDEX_FILE
+  fi
+
   # Timing (best-effort wall clock duration for this module).
   local _startup_t0="" _startup_t1=""
   _startup_t0="$(/bin/date +%s 2>/dev/null || echo '')"
@@ -671,6 +685,15 @@ run_startup_module() {
 
   _startup_on_return() {
     EXPLAIN="${_startup_prev_explain:-false}"
+
+    # Restore prior inventory index binding for other modules.
+    if [[ -n "${_startup_prev_inventory_index_file:-}" ]]; then
+      INVENTORY_INDEX_FILE="${_startup_prev_inventory_index_file}"
+      export INVENTORY_INDEX_FILE
+    else
+      unset INVENTORY_INDEX_FILE 2>/dev/null || true
+    fi
+
     _startup_finish_timing
   }
   trap _startup_on_return RETURN
@@ -695,7 +718,7 @@ run_startup_module() {
   STARTUP_ESTIMATED_RISK="low"
 
   # Collect identifiers for flagged startup items (prefer label; fall back to plist path).
-  STARTUP_FLAGGED_IDS=()
+  declare -a STARTUP_FLAGGED_IDS=()
   STARTUP_FLAGGED_IDS_LIST=""
 
   if [[ "${mode}" == "clean" || "${apply}" == "true" ]]; then
@@ -711,12 +734,6 @@ run_startup_module() {
   _startup_scan_launchd_dir "${explain}" "/System/Library/LaunchDaemons" "LaunchDaemon"
 
   _startup_scan_login_items "${explain}"
-
-  # Export flagged identifiers for run summary consumption.
-  # Safety: tolerate unset arrays under `set -u`.
-  if ! declare -p STARTUP_FLAGGED_IDS >/dev/null 2>&1; then
-    STARTUP_FLAGGED_IDS=()
-  fi
 
   # Ignore EPIPE when downstream closes early (e.g., `head -n`).
   if [[ ${#STARTUP_FLAGGED_IDS[@]} -gt 0 ]]; then

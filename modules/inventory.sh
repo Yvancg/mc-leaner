@@ -190,6 +190,7 @@ _inventory_add_index() {
   printf '%s\t%s\t%s\t%s\n' "$key" "$name" "$source" "$app_path" >> "$INVENTORY_INDEX_FILE"
 }
 
+
 _inventory_normalize_app_key() {
   # Purpose: Normalize an app name into a conservative inventory key.
   # Safety: Conservative normalization reduces false-positive ownership matches.
@@ -200,6 +201,47 @@ _inventory_normalize_app_key() {
   # strip spaces
   s="${s// /}"
   echo "$s"
+}
+
+inventory_normalize_owner_name() {
+  # Purpose: Normalize inventory display names to stable vendor-like owners when signals are strong.
+  # Safety: Conservative; only normalizes when we can infer vendor from static paths or well-known bundle-id prefixes.
+  # Contract:
+  #   inventory_normalize_owner_name <name> <key> <app_path>
+  # Output: normalized name (or original name when no safe normalization applies).
+
+  local name="${1:-}"
+  local key="${2:-}"
+  local app_path="${3:-}"
+
+  [[ -n "$name" ]] || { printf '%s' "$name"; return 0; }
+
+  # 1) Strong signal: apps installed in a vendor subfolder under /Applications.
+  # Example: /Applications/Bitdefender/AntivirusforMac.app -> vendor=Bitdefender
+  if [[ "$app_path" == /Applications/*/*.app ]]; then
+    local vendor_dir=""
+    vendor_dir="$(basename "$(dirname "$app_path" 2>/dev/null)" 2>/dev/null || true)"
+    if [[ -n "$vendor_dir" && "$vendor_dir" != "Applications" && "$vendor_dir" != "$name" ]]; then
+      printf '%s' "$vendor_dir"
+      return 0
+    fi
+  fi
+
+  # 2) Targeted bundle-id prefixes where the on-disk name is often a component rather than the vendor.
+  # Keep this list small and explicit; do not attempt to generalize all vendors.
+  case "$key" in
+    com.bitdefender.*)
+      printf '%s' "Bitdefender"
+      return 0
+      ;;
+    com.malwarebytes.*)
+      printf '%s' "Malwarebytes"
+      return 0
+      ;;
+  esac
+
+  printf '%s' "$name"
+  return 0
 }
 
 #
@@ -501,6 +543,14 @@ inventory_lookup() {
 
   local line
   line="$(awk -F'\t' -v k="$key" '$1==k {print $2"\t"$3"\t"$4; found=1; exit} END{exit(found?0:1)}' "$INVENTORY_INDEX_FILE" 2>/dev/null)" || return 1
+
+  # Normalize display name when we have strong static signals (vendor subfolder or explicit bundle prefix).
+  if declare -F inventory_normalize_owner_name >/dev/null 2>&1; then
+    local hit_name hit_source hit_path
+    IFS=$'\t' read -r hit_name hit_source hit_path <<< "$line"
+    hit_name="$(inventory_normalize_owner_name "$hit_name" "$key" "$hit_path" 2>/dev/null || printf '%s' "$hit_name")"
+    line="${hit_name}$'\t'${hit_source}$'\t'${hit_path}"
+  fi
 
   if [[ "$INVENTORY_CACHE_READY" == "true" ]]; then
     INVENTORY_CACHE_HITS["$key"]="$line"

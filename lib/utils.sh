@@ -70,6 +70,62 @@ PRIVACY_NETWORK_FACING_SERVICES=0
 # Format: scope=... | persistence=... | owner=... | label=...
 SERVICE_RECORDS_LIST=""
 
+
+# Newline-sentinel for Bash 3.2-safe dedupe by label.
+SERVICE_LABELS_SEEN=$'\n'
+
+# ----------------------------
+# Inventory-backed label-prefix attribution
+# ----------------------------
+# Purpose: attribute an owner from a launchd label by matching installed bundle-id prefixes in the inventory index.
+# Safety: inspection-only; reads inventory TSV only.
+
+inventory_owner_by_label_prefix() {
+  # Contract:
+  #   inventory_owner_by_label_prefix <label> [inventory_index_file]
+  # Output (newline terminated on success):
+  #   <owner>\t<how>\t<confidence>
+  # where:
+  #   how=inventory-label-prefix-match
+  #   confidence=medium when prefix has >=3 components, else low
+  # Returns non-zero and prints nothing on no match.
+
+  local label="${1:-}"
+  local inventory_index_file="${2:-${INVENTORY_INDEX_FILE:-}}"
+
+  [[ -n "$label" ]] || return 1
+  [[ -n "$inventory_index_file" && -f "$inventory_index_file" ]] || return 1
+
+  # Only attempt on reverse-DNS style labels.
+  [[ "$label" == *.*.* ]] || return 1
+
+  local parts_count="0"
+  parts_count="$(awk -F'.' '{print NF+0}' <<<"$label" 2>/dev/null || echo 0)"
+  [[ "$parts_count" -ge 2 ]] || return 1
+
+  local i prefix hit
+  for ((i=parts_count-1; i>=2; i--)); do
+    prefix="$(cut -d'.' -f1-"$i" <<<"$label" 2>/dev/null || true)"
+    [[ -n "$prefix" ]] || continue
+
+    # Match inventory keys that look like bundle ids and are not path:/brew: keys.
+    hit="$(awk -F'\t' -v p="$prefix" '
+      $1 !~ /^path:/ && $1 !~ /^brew:/ && $1 ~ /\./ && index($1,p)==1 {print $2; exit}
+    ' "$inventory_index_file" 2>/dev/null)" || true
+
+    if [[ -n "$hit" ]]; then
+      if [[ "$i" -ge 3 ]]; then
+        printf '%s\tinventory-label-prefix-match\tmedium\n' "$hit"
+      else
+        printf '%s\tinventory-label-prefix-match\tlow\n' "$hit"
+      fi
+      return 0
+    fi
+  done
+
+  return 1
+}
+
 # ----------------------------
 # Network-facing heuristics (v2.3.0, static)
 # ----------------------------
@@ -221,11 +277,12 @@ privacy_reset_counters() {
   PRIVACY_UNKNOWN_SERVICES=0
   PRIVACY_NETWORK_FACING_SERVICES=0
   SERVICE_RECORDS_LIST=""
+  SERVICE_LABELS_SEEN=$'\n'
 }
 
 service_emit_record() {
   # Contract:
-  #   service_emit_record <scope> <persistence> <owner> <label> [network_facing]
+  #   service_emit_record <scope> <persistence> <owner> <network_facing> <label>
   #
   # Output format (single line):
   #   SERVICE? scope=<system|user> | persistence=<boot|login|on-demand> | owner=<OwnerName|Unknown> | network_facing=<true|false> | label=<...>
@@ -234,14 +291,28 @@ service_emit_record() {
   local scope="${1:-}"
   local persistence="${2:-}"
   local owner="${3:-Unknown}"
-  local label="${4:-}"
-  local network_facing="${5:-false}"
+  local network_facing="${4:-}"
+  local label="${5:-}"
+
+  # Default: conservative false unless explicitly matched by static heuristics.
+  [[ -n "$network_facing" ]] || network_facing="false"
 
   # Fail-closed: do not emit malformed records.
   if [[ -z "$scope" || -z "$persistence" || -z "$label" ]]; then
     explain_log "service_emit_record: skip (missing fields) scope='$scope' persistence='$persistence' label='$label'"
     return 0
   fi
+
+  # Normalize label for stable dedupe.
+  label="$(printf '%s' "$label" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  [[ -n "$label" ]] || return 0
+
+  # Dedupe by label (exact match). Do not double-count or re-emit.
+  if [[ "${SERVICE_LABELS_SEEN}" == *$'\n'"${label}"$'\n'* ]]; then
+    explain_log "service_emit_record: skip (duplicate label) label='${label}'"
+    return 0
+  fi
+  SERVICE_LABELS_SEEN+="${label}"$'\n'
 
   PRIVACY_TOTAL_SERVICES=$((PRIVACY_TOTAL_SERVICES + 1))
   if [[ "$owner" == "Unknown" || -z "$owner" ]]; then
@@ -263,7 +334,7 @@ service_emit_record() {
   fi
 
   log "SERVICE? scope=${scope} | persistence=${persistence} | owner=${owner} | network_facing=${network_facing} | label=${label}"
-  
+
   # Keep a structured copy for correlation (logging remains the source of truth).
   SERVICE_RECORDS_LIST+="scope=${scope} | persistence=${persistence} | owner=${owner} | label=${label}"$'\n'
 }
@@ -410,6 +481,6 @@ summary_print() {
   fi
 }
 
-privacy_reset_counters
+# Note: privacy counters are initialized by the entrypoint (mc-leaner.sh) once per run.
 
 # End of library

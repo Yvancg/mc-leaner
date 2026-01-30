@@ -4,14 +4,19 @@
 # Purpose: Inspect macOS startup execution surfaces (launchd + login items) for visibility.
 # Safety: Inspection-only (never modifies system state). In clean/apply mode, it still only scans.
 # NOTE: Modules run with strict mode for deterministic failures and auditability.
+
 set -euo pipefail
+
+# Suppress SIGPIPE noise when output is piped to a consumer that exits early (e.g., `head -n`).
+# Safety: logging/output ergonomics only; does not affect inspection results.
+trap '' PIPE
 
 # Contract: run_startup_module <mode> <apply> <backup_dir> <explain> [inventory_index]
 # Note: Kept near the top so simple greps and partial prints (e.g., `sed -n '1,260p'`) will find it.
 
-# -----------------------------------------------------------------------------
+# ----------------------------
 # Contract: startup module output + summary (v2.2.0)
-# -----------------------------------------------------------------------------
+# ----------------------------
 # Safety
 #   - Inspection-only. Never modifies launchd, login items, or system state.
 #   - `mode=clean` or `apply=true` must still perform a scan only.
@@ -62,7 +67,6 @@ if ! command -v log >/dev/null 2>&1; then
   }
 fi
 
-
 if ! command -v explain_log >/dev/null 2>&1; then
   explain_log() {
     # Purpose: Best-effort verbose logging when --explain is enabled.
@@ -73,26 +77,16 @@ if ! command -v explain_log >/dev/null 2>&1; then
   }
 fi
 
-# Defensive fallback for service_emit_record (v2.3.0 contract-lock SERVICE? emission)
+# Ensure shared SERVICE? emitter is available (label-deduped, network-facing heuristics).
 if ! command -v service_emit_record >/dev/null 2>&1; then
-  service_emit_record() {
-    # Purpose: Best-effort SERVICE? output when shared helpers are not loaded.
-    # Safety: Logging only; does not change scan scope or cleanup behavior.
-    local scope="${1:-}"
-    local persistence="${2:-}"
-    local owner="${3:-Unknown}"
-    local label="${4:-}"
-    local network_facing="false"
-
-    [[ -n "$scope" && -n "$persistence" && -n "$label" ]] || return 0
-    log "SERVICE? scope=${scope} | persistence=${persistence} | owner=${owner:-Unknown} | network_facing=${network_facing} | label=${label}"
-  }
+  _startup_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  # shellcheck source=/dev/null
+  [[ -f "${_startup_dir}/../lib/utils.sh" ]] && source "${_startup_dir}/../lib/utils.sh"
 fi
 
-# -----------------------------------------------------------------------------
+# ----------------------------
 # Explain helper
-# -----------------------------------------------------------------------------
-
+# ----------------------------
 _startup_explain() {
   local explain="$1"; shift || true
   [[ "${explain}" == "true" ]] || return 0
@@ -105,11 +99,9 @@ _startup_explain() {
   fi
 }
 
-# -----------------------------------------------------------------------------
+# ----------------------------
 # Attribution helpers
-# -----------------------------------------------------------------------------
-
-
+# ----------------------------
 _startup_is_apple_owner() {
   # Apple-owned identifiers (best-effort).
   # Keep this strict to avoid mis-attributing third-party items that merely contain "apple".
@@ -153,7 +145,6 @@ _startup_plist_extract_raw() {
   local plist="$1" keypath="$2"
   /usr/bin/plutil -extract "${keypath}" raw -o - "${plist}" 2>/dev/null || true
 }
-
 
 _startup_plist_extract_xml() {
   # Usage: _startup_plist_extract_xml <plist> <keypath>
@@ -360,6 +351,20 @@ _startup_inventory_owner() {
     fi
   fi
 
+  # Generic fallback: match launchd label prefixes against installed bundle IDs in the inventory index.
+  if declare -F inventory_owner_by_label_prefix >/dev/null 2>&1; then
+    local prefix_meta=""
+    prefix_meta="$(inventory_owner_by_label_prefix "${label}" "${INVENTORY_INDEX_FILE:-}" 2>/dev/null || true)"
+    if [[ -n "${prefix_meta}" ]]; then
+      local p_owner="" p_how="" p_conf=""
+      p_owner="${prefix_meta%%$'\t'*}"
+      p_how="${prefix_meta#*$'\t'}"; p_how="${p_how%%$'\t'*}"
+      p_conf="${prefix_meta##*$'\t'}"
+      echo "${p_owner}|${p_how}|${p_conf}"
+      return 0
+    fi
+  fi
+
   # Fallback: explicit label-prefix owner map (static; not inventory-backed).
   local mapped=""
   mapped="$(_startup_label_prefix_owner "${label}")"
@@ -371,10 +376,9 @@ _startup_inventory_owner() {
   echo "Unknown|none|low"
 }
 
-# -----------------------------------------------------------------------------
+# ----------------------------
 # Impact scoring (v2.2.0)
-# -----------------------------------------------------------------------------
-
+# ----------------------------
 _startup_lc() {
   # Lowercase helper (bash 3.2 compatible)
   echo "$1" | tr '[:upper:]' '[:lower:]'
@@ -467,10 +471,9 @@ _startup_infer_impact() {
   echo "${impact}"
 }
 
-# -----------------------------------------------------------------------------
+# ----------------------------
 # Output
-# -----------------------------------------------------------------------------
-
+# ----------------------------
 _startup_emit_item() {
   # Inputs: explain timing source label exec_path owner how conf impact
   local explain="$1" timing="$2" source="$3" label="$4" exec_path="$5" owner="$6" how="$7" conf="$8" impact="$9"
@@ -487,10 +490,9 @@ _startup_emit_item() {
   _startup_explain "${explain}" "Startup item | timing=${timing} | source=${source} | label=${label} | exec=${exec_path} | attribution=${how} | confidence=${conf}"
 }
 
-# -----------------------------------------------------------------------------
+# ----------------------------
 # Collectors
-# -----------------------------------------------------------------------------
-
+# ----------------------------
 _startup_scan_launchd_dir() {
   # Inputs: explain dir source
   local explain="$1" dir="$2" source="$3"
@@ -526,8 +528,8 @@ _startup_scan_launchd_dir() {
 
     _startup_emit_item "${explain}" "${timing}" "${source}" "${label}" "${exec_path}" "${owner}" "${how}" "${conf}" "${impact}"
 
-    # Emit SERVICE? v2.3.0 contract-lock record (additive; no network-facing logic)
-    service_emit_record "${scope}" "${timing}" "${owner}" "${label}"
+    # Emit SERVICE? v2.3.0 contract-lock record (shared emitter: scope persistence owner network_facing label)
+    service_emit_record "${scope}" "${timing}" "${owner}" "" "${label}"
 
     STARTUP_CHECKED=$((STARTUP_CHECKED + 1))
 
@@ -619,8 +621,8 @@ APPLESCRIPT
 
     _startup_emit_item "${explain}" "${timing}" "LoginItem" "${label}" "${exec_path}" "${owner}" "${how}" "${conf}" "${impact}"
 
-    # Emit SERVICE? v2.3.0 contract-lock record for login items (user, login, ...)
-    service_emit_record "user" "login" "${owner}" "${label}"
+    # Emit SERVICE? v2.3.0 contract-lock record for login items (shared emitter: scope persistence owner network_facing label)
+    service_emit_record "user" "login" "${owner}" "" "${label}"
 
     STARTUP_CHECKED=$((STARTUP_CHECKED + 1))
     if [[ "${owner}" == "Unknown" ]]; then
@@ -635,11 +637,9 @@ APPLESCRIPT
   done <<<"${items}"
 }
 
-
-# -----------------------------------------------------------------------------
+# ----------------------------
 # Entrypoint
-# -----------------------------------------------------------------------------
-
+# ----------------------------
 run_startup_module() {
   local mode="${1:-scan}"
   local apply="${2:-false}"
@@ -713,7 +713,19 @@ run_startup_module() {
   _startup_scan_login_items "${explain}"
 
   # Export flagged identifiers for run summary consumption.
-  STARTUP_FLAGGED_IDS_LIST="$(printf '%s\n' "${STARTUP_FLAGGED_IDS[@]}" | sed '$s/\n$//')"
+  # Safety: tolerate unset arrays under `set -u`.
+  if ! declare -p STARTUP_FLAGGED_IDS >/dev/null 2>&1; then
+    STARTUP_FLAGGED_IDS=()
+  fi
+
+  # Ignore EPIPE when downstream closes early (e.g., `head -n`).
+  if [[ ${#STARTUP_FLAGGED_IDS[@]} -gt 0 ]]; then
+    STARTUP_FLAGGED_IDS_LIST="$(printf '%s\n' "${STARTUP_FLAGGED_IDS[@]}" 2>/dev/null || true)"
+    # Trim a single trailing newline if present.
+    STARTUP_FLAGGED_IDS_LIST="${STARTUP_FLAGGED_IDS_LIST%$'\n'}"
+  else
+    STARTUP_FLAGGED_IDS_LIST=""
+  fi
 
   # Estimated risk (v2.2.0): conservative summary hinting.
   STARTUP_ESTIMATED_RISK="low"

@@ -16,6 +16,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # ----------------------------
 # shellcheck source=lib/*.sh
 source "$ROOT_DIR/lib/utils.sh"
+# Initialize privacy/service counters once per run (v2.3.0 contract).
+privacy_reset_counters
 source "$ROOT_DIR/lib/cli.sh"
 source "$ROOT_DIR/lib/ui.sh"
 source "$ROOT_DIR/lib/fs.sh"

@@ -7,9 +7,6 @@
 # NOTE: Modules run with strict mode for deterministic failures and auditability.
 set -euo pipefail
 
-# ----------------------------
-# Defensive Checks
-# ----------------------------
 # Purpose: Provide safe fallbacks when shared helpers are not loaded.
 # Safety: Logging only; must not change inspection or cleanup behavior.
 if ! type explain_log >/dev/null 2>&1; then
@@ -22,24 +19,13 @@ if ! type explain_log >/dev/null 2>&1; then
   }
 fi
 
-if ! type service_emit_record >/dev/null 2>&1; then
-  service_emit_record() {
-    # Purpose: Best-effort SERVICE? output when shared helpers are not loaded.
-    # Safety: Logging only; does not change scan scope or cleanup behavior.
-    local scope="${1:-}"
-    local persistence="${2:-}"
-    local owner="${3:-Unknown}"
-    local label="${4:-}"
-    local network_facing="false"
-
-    [[ -n "$scope" && -n "$persistence" && -n "$label" ]] || return 0
-    log "SERVICE? scope=${scope} | persistence=${persistence} | owner=${owner:-Unknown} | network_facing=${network_facing} | label=${label}"
-  }
+# Ensure shared SERVICE? emitter is available (label-deduped, network-facing heuristics).
+if ! command -v service_emit_record >/dev/null 2>&1; then
+  _launchd_dir="$(cd "$(dirname "${BASH_SOURCE[0]}" )" && pwd)"
+  # shellcheck source=/dev/null
+  [[ -f "${_launchd_dir}/../lib/utils.sh" ]] && source "${_launchd_dir}/../lib/utils.sh"
 fi
 
-# ----------------------------
-# Defensive Checks
-# ----------------------------
 if ! type tmpfile >/dev/null 2>&1; then
   tmpfile() {
     # Purpose: Create a temporary file path.
@@ -371,17 +357,63 @@ run_launchd_module() {
           ;;
       esac
 
-      owner="$(_launchd_inventory_owner "$label")"
-      if [[ "$owner" == "Unknown" ]]; then
-        local mapped_owner
-        mapped_owner="$(_launchd_label_prefix_owner "$label")"
+      # Resolve program path early so we can attribute by exec path when possible.
+      local prog
+      prog="$(_launchd_program_path "$plist_path")"
+
+      # Owner attribution (inventory-first; conservative fallbacks).
+      owner=""
+
+      # 1) Exact bundle-id match (label key).
+      if declare -F inventory_lookup_owner_by_bundle_id >/dev/null 2>&1; then
+        owner="$(inventory_lookup_owner_by_bundle_id "${label}" 2>/dev/null || true)"
+      else
+        owner="$(_inventory_index_name_for_key "$label" 2>/dev/null || true)"
+      fi
+
+      # 2) Exec path match (preferred when available).
+      if [[ -z "${owner}" && -n "${prog}" ]]; then
+        if declare -F inventory_lookup_owner_by_path >/dev/null 2>&1; then
+          owner="$(inventory_lookup_owner_by_path "${prog}" 2>/dev/null || true)"
+        else
+          owner="$(_inventory_index_name_for_key "path:${prog}" 2>/dev/null || true)"
+        fi
+      fi
+
+      # 3) Conservative inventory-backed heuristics.
+      if [[ -z "${owner}" ]]; then
+        owner="$(_launchd_inventory_owner "${label}" 2>/dev/null || true)"
+        [[ "${owner}" == "Unknown" ]] && owner=""
+      fi
+
+      # 4) Generic fallback: match launchd label prefixes against installed bundle IDs.
+      if [[ -z "${owner}" ]] && declare -F inventory_owner_by_label_prefix >/dev/null 2>&1; then
+        local prefix_meta=""
+        prefix_meta="$(inventory_owner_by_label_prefix "${label}" "${inventory_index_file:-${INVENTORY_INDEX_FILE:-}}" 2>/dev/null || true)"
+        if [[ -n "${prefix_meta}" ]]; then
+          local p_owner="" p_how="" p_conf=""
+          p_owner="${prefix_meta%%$'\t'*}"
+          p_how="${prefix_meta#*$'\t'}"; p_how="${p_how%%$'\t'*}"
+          p_conf="${prefix_meta##*$'\t'}"
+
+          owner="${p_owner}"
+          explain_log "Launchd owner: ${p_how} (conf=${p_conf}) | label=${label} | owner=${owner}"
+        fi
+      fi
+
+      # 5) Last resort: small explicit prefix map.
+      if [[ -z "${owner}" ]]; then
+        local mapped_owner=""
+        mapped_owner="$(_launchd_label_prefix_owner "${label}")"
         if [[ -n "$mapped_owner" ]]; then
           owner="$mapped_owner"
           explain_log "Launchd owner: label-prefix-map | label=${label} | owner=${owner}"
         fi
       fi
 
-      service_emit_record "$scope" "$persistence" "$owner" "$label"
+      [[ -z "${owner}" ]] && owner="Unknown"
+
+      service_emit_record "$scope" "$persistence" "$owner" "" "$label"
 
       checked=$((checked + 1))
 
@@ -410,9 +442,6 @@ run_launchd_module() {
         explain_log "SKIP (installed-match via inventory): $plist_path (label: $label)"
         continue
       fi
-
-      local prog
-      prog="$(_launchd_program_path "$plist_path")"
 
       # SAFETY: if we cannot resolve a program path, skip instead of guessing.
       # This reduces false positives for plists that only define other keys.
@@ -487,5 +516,3 @@ run_launchd_module() {
   _launchd_finish_timing
   _launchd_summary_emit "${checked}"
 }
-
-# End of module

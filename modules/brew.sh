@@ -5,7 +5,6 @@
 # Safety: read-only; does NOT run brew cleanup/uninstall/upgrade; no filesystem writes
 # Notes: best-effort parsing; macOS default bash 3.2 compatible
 
-
 # NOTE: Modules run with strict mode for deterministic failures and auditability.
 set -euo pipefail
 
@@ -66,12 +65,12 @@ _brew_array_len() {
   # expanding `${foo[@]}` still errors under `set -u`. So we must check "is set" too.
   if declare -p "$name" >/dev/null 2>&1; then
     if eval '[[ ${'"$name"'[@]+x} ]]'; then
-      eval "echo \${#$name[@]}"
+      eval "printf '%s\n' \${#$name[@]}"
     else
-      echo 0
+      printf '0\n'
     fi
   else
-    echo 0
+    printf '0\n'
   fi
 }
 
@@ -100,7 +99,7 @@ _brew_exists() {
 _brew_prefix() {
   # Purpose: return brew prefix (best-effort)
   # Safety: read-only
-  brew --prefix 2>/dev/null || echo ""
+  brew --prefix 2>/dev/null || printf ''
 }
 
 _brew_kb_to_mb() {
@@ -117,7 +116,7 @@ _brew_kb_to_mb() {
     kb="0"
   fi
 
-  echo $((kb / 1024))
+  printf '%s\n' $((kb / 1024))
 }
 
 _brew_dir_mb() {
@@ -242,20 +241,20 @@ _brew_top_n_largest_formulae() {
       done
 
   # Sort by size desc and print top N.
-  sort -t '|' -k1,1nr "${tmp}" 2>/dev/null | head -n "$n" | while IFS='|' read -r mb f; do
+  while IFS='|' read -r mb f; do
     [[ -n "$f" ]] || continue
 
     # Versions: avoid `brew` calls; list version directories under Cellar/<formula>.
     local versions
     versions=$(ls -1 "$cellar/$f" 2>/dev/null | _brew_sorted_unique_lines || true)
-    versions=$(echo "$versions" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g' | sed -E 's/[[:space:]]+$//')
+    versions=$(printf '%s\n' "$versions" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g' | sed -E 's/[[:space:]]+$//')
 
     log "BREW SIZE: ${f} | ${mb}MB | versions: ${versions:-unknown}"
     BREW_TOP_SIZES+=("${f}|${mb}|${versions:-unknown}")
     if [[ "${EXPLAIN:-false}" == "true" ]]; then
       explain_log "  source: Cellar size (single-pass scan)"
     fi
-  done
+  done < <(sort -t '|' -k1,1nr "${tmp}" 2>/dev/null | head -n "$n" 2>/dev/null)
 }
 
 _brew_cache_downloads_summary() {
@@ -372,8 +371,8 @@ run_brew_module() {
 
   local n_formulae
   local n_casks
-  n_formulae=$(echo "$formulae" | awk 'NF' | wc -l | tr -d ' ' || echo "0")
-  n_casks=$(echo "$casks" | awk 'NF' | wc -l | tr -d ' ' || echo "0")
+  n_formulae=$(printf '%s\n' "$formulae" | awk 'NF' | wc -l | tr -d ' ' || printf '0')
+  n_casks=$(printf '%s\n' "$casks" | awk 'NF' | wc -l | tr -d ' ' || printf '0')
 
   log "BREW SUMMARY:"
   log "  formulas: ${n_formulae}"
@@ -394,7 +393,7 @@ run_brew_module() {
       if [[ "${EXPLAIN:-false}" == "true" ]]; then
         explain_log "    reason: brew leaves (no other formula depends on it)"
       fi
-    done <<< "$(echo "$leaves" | awk 'NF')"
+    done <<< "$(printf '%s\n' "$leaves" | awk 'NF')"
   else
     log "BREW LEAVES (not depended on by other formulae): none"
   fi
@@ -421,7 +420,7 @@ run_brew_module() {
       # First token is the formula name (brew outdated prints just the name)
       local name
       name="$(echo "$line" | awk '{print $1}')"
-      if echo "$pinned_lookup" | grep -Fq $'\n'"$name"$'\n'; then
+      if printf '%s\n' "$pinned_lookup" | grep -Fq $'\n'"$name"$'\n'; then
         outdated_pinned="${outdated_pinned}${line}"$'\n'
         BREW_OUTDATED_PINNED+=("$name")
       else
@@ -434,7 +433,7 @@ run_brew_module() {
 
   if [[ -n "$outdated_unpinned" ]]; then
     log "BREW OUTDATED (formulae):"
-    echo "$outdated_unpinned" | awk 'NF' | while IFS= read -r line; do
+    printf '%s\n' "$outdated_unpinned" | awk 'NF' | while IFS= read -r line; do
       log "  ${line}"
     done
   else
@@ -443,7 +442,7 @@ run_brew_module() {
 
   if [[ -n "$outdated_pinned" ]]; then
     log "BREW OUTDATED BUT PINNED (formulae):"
-    echo "$outdated_pinned" | awk 'NF' | while IFS= read -r line; do
+    printf '%s\n' "$outdated_pinned" | awk 'NF' | while IFS= read -r line; do
       log "  ${line}"
       if [[ "${EXPLAIN:-false}" == "true" ]]; then
         explain_log "    note: pinned formulae are excluded from brew upgrade"
@@ -453,7 +452,7 @@ run_brew_module() {
 
   if [[ -n "$outdated_c" ]]; then
     log "BREW OUTDATED (casks):"
-    echo "$outdated_c" | awk 'NF' | while IFS= read -r line; do
+    printf '%s\n' "$outdated_c" | awk 'NF' | while IFS= read -r line; do
       log "  ${line}"
     done
   else

@@ -8,7 +8,6 @@
 # NOTE: Modules run with strict mode for deterministic failures and auditability.
 set -euo pipefail
 
-
 # ----------------------------
 # Defensive Checks
 # ----------------------------
@@ -212,7 +211,6 @@ _logs_move_to_backup() {
   return 0
 }
 
-#
 # ----------------------------
 # Module Entry Point
 # ----------------------------
@@ -234,12 +232,19 @@ run_logs_module() {
 
   _logs_finish_timing() {
     # SAFETY: must be safe under `set -u` and when invoked on early returns.
-    _logs_t1="$(/bin/date +%s 2>/dev/null || echo '')"
-    if [[ -n "${_logs_t0:-}" && -n "${_logs_t1:-}" ]]; then
+    _logs_t1="$(/bin/date +%s 2>/dev/null || printf '')"
+
+    # Guard arithmetic in strict mode: only compute if both are integers.
+    if [[ "${_logs_t0:-}" =~ ^[0-9]+$ && "${_logs_t1:-}" =~ ^[0-9]+$ ]]; then
       LOGS_DUR_S=$((_logs_t1 - _logs_t0))
+    else
+      LOGS_DUR_S=0
     fi
+
+    # Restore caller's EXPLAIN setting.
     EXPLAIN="${_logs_prev_explain:-false}"
   }
+
   trap _logs_finish_timing RETURN
 
   local _logs_prev_explain="${EXPLAIN:-false}"
@@ -326,7 +331,6 @@ run_logs_module() {
 
   if [[ "$found" -eq 0 ]]; then
     log "Logs: no large log items found (by threshold)."
-    _logs_finish_timing
     return 0
   fi
 
@@ -456,7 +460,6 @@ run_logs_module() {
   # Global summary contribution
   # ----------------------------
   if type summary_add >/dev/null 2>&1; then
-    _logs_finish_timing
     # Module Output Contract: end-of-run summary line
     # Format: <Module> flagged=<n> total_mb=<n> moved=<n> failures=<n>
     # Notes:

@@ -296,10 +296,10 @@ service_emit_record() {
   # Contract:
   #   service_emit_record <scope> <persistence> <owner> <network_facing> <label>
   #
-  # Output format (single line):
+  # Output format (single line to stdout):
   #   SERVICE? scope=<system|user> | persistence=<boot|login|on-demand> | owner=<OwnerName|Unknown> | network_facing=<true|false> | label=<...>
   #
-  # Safety: logging only.
+  # Safety: machine-readable output only; must not call log().
   local scope="${1:-}"
   local persistence="${2:-}"
   local owner="${3:-Unknown}"
@@ -345,9 +345,12 @@ service_emit_record() {
     explain_log "network_facing=true because ${nf_rule}: owner=${owner} reason=${nf_reason} label=${label}"
   fi
 
-  log "SERVICE? scope=${scope} | persistence=${persistence} | owner=${owner} | network_facing=${network_facing} | label=${label}"
+  # Emit machine-readable record to stdout.
+  printf 'SERVICE? scope=%s | persistence=%s | owner=%s | network_facing=%s | label=%s\n' \
+    "$scope" "$persistence" "$owner" "$network_facing" "$label" \
+    2>/dev/null || true
 
-  # Keep a structured copy for correlation (logging remains the source of truth).
+  # Keep a structured copy for correlation.
   SERVICE_RECORDS_LIST+=$'scope='"${scope}"$' | persistence='"${persistence}"$' | owner='"${owner}"$' | network_facing='"${network_facing}"$' | label='"${label}"$'\n'
 }
 
@@ -455,10 +458,11 @@ summary_print() {
 
   log "RUN SUMMARY:"
 
-  if [ "${PRIVACY_TOTAL_SERVICES:-0}" -gt 0 ]; then
+  if [[ "${PRIVACY_TOTAL_SERVICES:-0}" -gt 0 ]]; then
     local privacy_line=""
     privacy_line="$(privacy_summary_line 2>/dev/null || true)"
-    if [ -n "$privacy_line" ]; then
+    privacy_line="${privacy_line%$'\n'}"
+    if [[ -n "$privacy_line" ]]; then
       log "  - ${privacy_line}"
     fi
   fi

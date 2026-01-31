@@ -39,32 +39,49 @@
 #       - Heuristic name-only inference (e.g., leaf name under Caches/Logs), OR
 #       - Unknown
 
- # NOTE: This module is inspection-only and uses best-effort probing.
-# It enables pipefail but avoids `set -euo pipefail` to prevent aborting on expected permission/absence errors.
-set -o pipefail
+# Strict mode for deterministic failures.
+set -euo pipefail
 
- # ----------------------------
+# Suppress SIGPIPE noise when piped to early-exiting consumers.
+trap '' PIPE
+
+# Standalone-friendly bootstrap: when invoked directly, ensure shared helpers exist.
+# When sourced by mc-leaner.sh, these will already exist and this block is a no-op.
+if ! declare -F log >/dev/null 2>&1; then
+  _DISK_ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  # shellcheck source=../lib/utils.sh
+  source "${_DISK_ROOT_DIR}/lib/utils.sh"
+  # shellcheck source=../lib/fs.sh
+  source "${_DISK_ROOT_DIR}/lib/fs.sh"
+  # shellcheck source=../lib/safety.sh
+  source "${_DISK_ROOT_DIR}/lib/safety.sh"
+fi
+
+_disk_is_uint() {
+  # Usage: _disk_is_uint <value>
+  [[ -n "${1:-}" && "${1}" =~ ^[0-9]+$ ]]
+}
+
+# ----------------------------
 # Logging Fallbacks
 # ----------------------------
-
-if ! command -v log_info >/dev/null 2>&1; then
+if ! declare -f log_info >/dev/null 2>&1; then
   log_info() {
     # Purpose: Fallback logger when the module is executed standalone.
-    printf '%s\n' "$*" 2>/dev/null || true
+    { printf '%s\n' "$*" >&2; } 2>/dev/null || true
   }
 fi
 
-if ! command -v log_explain >/dev/null 2>&1; then
+if ! declare -f log_explain >/dev/null 2>&1; then
   log_explain() {
     # Purpose: Fallback explain logger when the module is executed standalone.
-    printf '[EXPLAIN] %s\n' "$*" 2>/dev/null || true
+    { printf '[EXPLAIN] %s\n' "$*" >&2; } 2>/dev/null || true
   }
 fi
 
- # ----------------------------
+# ----------------------------
 # Explain Helper
 # ----------------------------
-
 _disk_explain() {
   # Purpose: Emit explain lines only when explain=true.
   # Usage: _disk_explain "message"
@@ -74,10 +91,9 @@ _disk_explain() {
   fi
 }
 
- # ----------------------------
+# ----------------------------
 # Small Helpers
 # ----------------------------
-
 _disk_is_true() {
   case "${1:-}" in
     1|true|TRUE|yes|YES|y|Y) return 0 ;;
@@ -85,19 +101,31 @@ _disk_is_true() {
   esac
 }
 
+_disk_uint_or_zero() {
+  local v="${1:-0}"
+  if [[ -z "$v" || ! "$v" =~ ^[0-9]+$ ]]; then
+    v=0
+  fi
+  printf '%s' "$v"
+}
+
+_disk_now_epoch_s() {
+  /bin/date +%s 2>/dev/null || printf '0\n'
+}
+
 _disk_du_kb() {
   # Purpose: Return integer KB for a path (permission errors suppressed).
   local p="$1"
   if [[ -z "$p" || ! -e "$p" ]]; then
-    echo 0
+    printf '0\n'
     return 0
   fi
   local kb
   kb="$(LC_ALL=C du -sk "$p" 2>/dev/null | awk 'NR==1{print $1+0}')"
   if [[ -z "$kb" ]]; then
-    echo 0
+    printf '0\n'
   else
-    echo "$kb"
+    printf '%s\n' "$kb"
   fi
 }
 
@@ -107,31 +135,15 @@ _disk_kb_to_mb_round() {
   awk -v kb="$kb" 'BEGIN{ if(kb<=0){print 0; exit} printf("%d", int((kb/1024)+0.5)) }'
 }
 
-_disk_mb_to_human() {
-  # Purpose: Convert integer MB to a compact human string (MB or GB).
-  # Safety: formatting only.
-  local mb="${1:-0}"
-  if [[ -z "$mb" ]]; then
-    echo "-"
-    return 0
-  fi
-
-  if (( mb >= 1024 )); then
-    awk -v mb="$mb" 'BEGIN{ printf("%.1fGB", mb/1024.0) }'
-  else
-    printf '%sMB' "$mb"
-  fi
-}
 
 _disk_normalize() {
   # Purpose: Normalize a token (lowercase, strip non-alphanumerics).
-  echo "${1:-}" | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:]'
+  printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:]'
 }
 
- # ----------------------------
+# ----------------------------
 # Attribution Helpers
 # ----------------------------
-
 _disk_owner_from_inventory() {
   # Best-effort lookup against an inventory index file.
   # Heuristic: match normalized token anywhere on a line.
@@ -275,26 +287,26 @@ _disk_category_for_path() {
   esac
 }
 
- # ----------------------------
+# ----------------------------
 # Output Helpers
 # ----------------------------
-
 _disk_emit_item() {
-  # Format:
-  # DISK? <size> | owner: <owner> | conf: <conf> | category: <cat> | path: <path>
+  # Format (stdout):
+  # DISK? <size>MB | owner: <owner> | conf: <low|medium|high> | category: <...> | path: <path>
   local mb="$1"
   local owner="$2"
   local conf="$3"
   local cat="$4"
   local p="$5"
 
-  log_info "DISK? ${mb}MB | owner: ${owner} | conf: ${conf} | category: ${cat} | path: ${p}"
+  # stdout is reserved for machine-readable records.
+  printf 'DISK? %sMB | owner: %s | conf: %s | category: %s | path: %s\n' \
+    "${mb}" "${owner}" "${conf}" "${cat}" "${p}"
 }
 
- # ----------------------------
+# ----------------------------
 # Collectors
 # ----------------------------
-
 _disk_collect_sizes() {
   # Writes: "mb<TAB>path" lines to the provided output file.
   local out_file="$1"
@@ -353,10 +365,9 @@ _disk_collect_sizes() {
   done
 }
 
- # ----------------------------
+# ----------------------------
 # Module Entry Point
 # ----------------------------
-
 run_disk_module() {
   # Contract:
   #   run_disk_module <mode> <apply> <backup_dir> <explain> [inventory_index_file]
@@ -374,7 +385,7 @@ run_disk_module() {
 
   # Timing (best-effort wall clock duration for this module).
   local _disk_t0="" _disk_t1=""
-  _disk_t0="$(/bin/date +%s 2>/dev/null || echo '')"
+  _disk_t0="$(_disk_now_epoch_s)"
   DISK_DUR_S=0
 
 
@@ -403,7 +414,9 @@ run_disk_module() {
     return 1
   }
 
-  # Ensure cleanup on all exits.
+  # Ensure cleanup on all exits (without clobbering parent RETURN traps).
+  local _old_return_trap=""
+  _old_return_trap="$(trap -p RETURN 2>/dev/null || true)"
   trap 'rm -f "${tmp}" 2>/dev/null || true' RETURN
 
   _disk_collect_sizes "${tmp}" "${min_mb}"
@@ -419,7 +432,15 @@ run_disk_module() {
   # Sort by size (descending). Count all items >= threshold, but only emit top N.
   local mb p
   while IFS=$'\t' read -r mb p; do
-    mb="${mb:-0}"
+    mb="${mb:-}"
+
+    # Guard: only process numeric size rows. This prevents arithmetic errors if any
+    # unexpected text makes it into the stream.
+    if [[ -z "${mb}" || ! "${mb}" =~ ^[0-9]+$ ]]; then
+      _disk_explain "Disk: skip (non-numeric size): ${mb:-<empty>} | ${p:-<empty>}"
+      continue
+    fi
+
     [[ -n "${p}" ]] || continue
 
     checked=$((checked + 1))
@@ -459,10 +480,20 @@ run_disk_module() {
 
   DISK_FLAGGED_RECORDS_LIST="$(printf '%s' "${DISK_FLAGGED_RECORDS_TSV}" | sed '$s/\n$//')"
 
-  _disk_t1="$(/bin/date +%s 2>/dev/null || echo '')"
-  if [[ -n "${_disk_t0}" && -n "${_disk_t1}" ]]; then
-    DISK_DUR_S=$((_disk_t1 - _disk_t0))
+  _disk_t1="$(_disk_now_epoch_s)"
+  _disk_t0="$(_disk_uint_or_zero "${_disk_t0:-0}")"
+  _disk_t1="$(_disk_uint_or_zero "${_disk_t1:-0}")"
+  DISK_DUR_S=$((_disk_t1 - _disk_t0))
+  if (( DISK_DUR_S < 0 )); then
+    DISK_DUR_S=0
   fi
 
+  if [[ -n "${_old_return_trap}" ]]; then
+    eval "${_old_return_trap}"
+  else
+    trap - RETURN
+  fi
   log_info "Disk: inspected ${checked} item(s); flagged=${flagged} total_mb=${total_mb} printed=${printed} (top_n=${top_n} threshold=${min_mb}MB)"
 }
+
+# End of module

@@ -5,7 +5,12 @@
 # Safety: Defaults to dry-run; never deletes; moves require explicit `--apply` and per-item confirmation; hard-skips security software
 
 # NOTE: Modules run with strict mode for deterministic failures and auditability.
+
 set -euo pipefail
+
+# Suppress SIGPIPE noise when output is piped to a consumer that exits early (e.g., `head -n`).
+# Safety: logging/output ergonomics only; does not affect inspection results.
+trap '' PIPE
 
 # Purpose: Provide safe fallbacks when shared helpers are not loaded.
 # Safety: Logging only; must not change inspection or cleanup behavior.
@@ -26,20 +31,15 @@ if ! command -v service_emit_record >/dev/null 2>&1; then
   [[ -f "${_launchd_dir}/../lib/utils.sh" ]] && source "${_launchd_dir}/../lib/utils.sh"
 fi
 
-if ! type tmpfile >/dev/null 2>&1; then
-  tmpfile() {
-    # Purpose: Create a temporary file path.
-    # Safety: Returns a path only; caller owns content.
-    if is_cmd mktemp; then
-      mktemp 2>/dev/null || mktemp -t mc-leaner 2>/dev/null
-    else
-      # Very defensive fallback
-      local p="${TMPDIR:-/tmp}/mc-leaner.$$.${RANDOM}.tmp"
-      : >"$p"
-      echo "$p"
-    fi
-  }
-fi
+# ----------------------------
+# Local temp file helper (do NOT use shared tmpfile() here)
+# ----------------------------
+_launchd_tmpfile() {
+  # Purpose: Create a temp file for this module only.
+  # Safety: Creates an empty temp file.
+  # Important: must not write anything except the path to stdout.
+  mktemp -t mc-leaner.XXXXXX 2>/dev/null || true
+}
 
 # ----------------------------
 # Module Entry Point
@@ -58,8 +58,10 @@ run_launchd_module() {
 
   _launchd_finish_timing() {
     _launchd_t1="$(/bin/date +%s 2>/dev/null || echo '')"
-    if [[ -n "${_launchd_t0:-}" && -n "${_launchd_t1:-}" ]]; then
+    if [[ -n "${_launchd_t0:-}" && -n "${_launchd_t1:-}" && "${_launchd_t0}" =~ ^[0-9]+$ && "${_launchd_t1}" =~ ^[0-9]+$ ]]; then
       LAUNCHD_DUR_S=$((_launchd_t1 - _launchd_t0))
+    else
+      LAUNCHD_DUR_S=0
     fi
   }
   trap _launchd_finish_timing RETURN
@@ -87,10 +89,16 @@ run_launchd_module() {
 
   # Precompute inventory keys for fast membership checks (performance)
   if [[ -n "${inventory_index_file}" && -f "${inventory_index_file}" ]]; then
-    inventory_keys_file="$(tmpfile)"
-    _launchd_tmpfiles+=("$inventory_keys_file")
-    # Column 1 contains keys; de-duplicate once
-    cut -f1 "${inventory_index_file}" | LC_ALL=C sort -u >"${inventory_keys_file}" 2>/dev/null || true
+    inventory_keys_file="$(_launchd_tmpfile)"
+    if [[ -n "${inventory_keys_file:-}" ]]; then
+      _launchd_tmpfiles+=("${inventory_keys_file}")
+      # Column 1 contains keys; de-duplicate once (SIGPIPE-safe under piped output)
+      {
+        LC_ALL=C sort -u < <(cut -f1 "${inventory_index_file}" 2>/dev/null || true) >"${inventory_keys_file}" 2>/dev/null
+      } 2>/dev/null || true
+    else
+      inventory_keys_file=""
+    fi
   fi
 
   # ----------------------------
@@ -288,15 +296,20 @@ run_launchd_module() {
   # Snapshot Active launchctl Jobs
   # ----------------------------
   log "Scanning active launchctl jobs..."
-  active_jobs_file="$(tmpfile)"
-  _launchd_tmpfiles+=("$active_jobs_file")
+  active_jobs_file="$(_launchd_tmpfile)"
+  if [[ -n "${active_jobs_file:-}" ]]; then
+    _launchd_tmpfiles+=("${active_jobs_file}")
 
-  # Helper: determine whether a label is currently loaded (reduces false positives)
-  launchctl list | awk 'NR>1 {print $3}' | grep -v '^-$' >"$active_jobs_file" 2>/dev/null || true
+    # Helper: determine whether a label is currently loaded (reduces false positives)
+    launchctl list 2>/dev/null | awk 'NR>1 {print $3}' 2>/dev/null | grep -v '^-$' 2>/dev/null >"${active_jobs_file}" 2>/dev/null || true
+  else
+    active_jobs_file=""
+  fi
 
   is_active_job() {
     local job="$1"
-    grep -qxF "$job" "$active_jobs_file"
+    [[ -n "${job:-}" && -n "${active_jobs_file:-}" && -f "${active_jobs_file}" ]] || return 1
+    grep -qxF "$job" "${active_jobs_file}" 2>/dev/null
   }
 
   # ----------------------------
@@ -509,7 +522,7 @@ run_launchd_module() {
   explain_log "Launchd: checked ${checked} plists."
 
   # Export flagged identifiers list for run summary consumption.
-  LAUNCHD_FLAGGED_IDS_LIST="$(printf '%s\n' "${flagged_items[@]}")"
+  LAUNCHD_FLAGGED_IDS_LIST="$({ printf '%s\n' "${flagged_items[@]}"; } 2>/dev/null || true)"
   LAUNCHD_FLAGGED_COUNT="${flagged_count}"
   LAUNCHD_DUR_S="${LAUNCHD_DUR_S:-0}"
 

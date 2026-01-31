@@ -11,16 +11,22 @@
 # Purpose: Emit a stable timestamp for log lines.
 # Safety: Logging only.
 ts() {
-  date +"%Y-%m-%d %H:%M:%S"
+  /bin/date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || /bin/date 2>/dev/null || echo ""
 }
 
 # Purpose: Emit a single log line with timestamp prefix.
 # Safety: Logging only.
 log() {
-  printf "[%s] %s\n" "$(ts)" "$*"
+  # Purpose: Emit a single log line with timestamp prefix.
+  # Safety: Logging only. Always stderr. Ignore EPIPE.
+  local _ts=""
+  _ts="$(ts)"
+  printf '[%s] %s\n' "${_ts}" "$*" >&2 2>/dev/null || true
 }
 
-# Compatibility aliases (modules and entrypoint may call these)
+# Compatibility wrappers (modules and entrypoint may call these)
+# Purpose: maintain a stable API; levels are handled by caller text, not formatting.
+# Safety: logging only. Always stderr. Ignore EPIPE.
 log_info()  { log "$@"; }
 log_warn()  { log "$@"; }
 log_error() { log "$@"; }
@@ -34,11 +40,11 @@ die() {
   exit "$code"
 }
 
-# Purpose: Emit verbose reasoning only when --explain is enabled.
-# Safety: Logging only.
 explain_log() {
-  if [ "${EXPLAIN:-false}" = "true" ]; then
-    log "EXPLAIN: $*"
+  # Purpose: Emit verbose reasoning only when --explain is enabled.
+  # Safety: Logging only. Always stderr. Ignore EPIPE.
+  if [[ "${EXPLAIN:-false}" == "true" ]]; then
+    printf '[EXPLAIN] %s\n' "$*" 1>&2 2>/dev/null || true
   fi
 }
 
@@ -52,7 +58,12 @@ is_cmd() { command -v "$1" >/dev/null 2>&1; }
 # ----------------------------
 tmpfile() {
   # Purpose: create a unique temp file path compatible with macOS Bash 3.2
-  mktemp "/tmp/mc-leaner.XXXXXX"
+  # Safety: returns empty string on failure. Does not log.
+  local base="${TMPDIR:-/tmp}"
+  local p=""
+  p="$(/usr/bin/mktemp "${base%/}/mc-leaner.XXXXXX" 2>/dev/null)" || { echo ""; return 0; }
+  : > "${p}" 2>/dev/null || true
+  printf '%s' "${p}"
 }
 
 # ----------------------------
@@ -100,7 +111,8 @@ inventory_owner_by_label_prefix() {
   [[ "$label" == *.*.* ]] || return 1
 
   local parts_count="0"
-  parts_count="$(awk -F'.' '{print NF+0}' <<<"$label" 2>/dev/null || echo 0)"
+  parts_count="$(awk -F'.' '{print NF+0}' <<<"$label" 2>/dev/null)"
+  [[ -n "${parts_count}" ]] || parts_count="0"
   [[ "$parts_count" -ge 2 ]] || return 1
 
   local i prefix hit
@@ -304,7 +316,7 @@ service_emit_record() {
   fi
 
   # Normalize label for stable dedupe.
-  label="$(printf '%s' "$label" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  label="$({ printf '%s' "$label"; } 2>/dev/null | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')" || true
   [[ -n "$label" ]] || return 0
 
   # Dedupe by label (exact match). Do not double-count or re-emit.
@@ -336,16 +348,17 @@ service_emit_record() {
   log "SERVICE? scope=${scope} | persistence=${persistence} | owner=${owner} | network_facing=${network_facing} | label=${label}"
 
   # Keep a structured copy for correlation (logging remains the source of truth).
-  SERVICE_RECORDS_LIST+="scope=${scope} | persistence=${persistence} | owner=${owner} | label=${label}"$'\n'
+  SERVICE_RECORDS_LIST+=$'scope='"${scope}"$' | persistence='"${persistence}"$' | owner='"${owner}"$' | network_facing='"${network_facing}"$' | label='"${label}"$'\n'
 }
 
 privacy_summary_line() {
   # Purpose: emit a stable, parseable privacy summary line for end-of-run summary.
-  # Safety: logging only.
-  printf 'privacy: total_services=%s unknown_services=%s network_facing=%s' \
-    "${PRIVACY_TOTAL_SERVICES}" \
-    "${PRIVACY_UNKNOWN_SERVICES}" \
-    "${PRIVACY_NETWORK_FACING_SERVICES}"
+  # Safety: machine-readable line; stdout only. Ignore EPIPE.
+  printf 'privacy: total_services=%s unknown_services=%s network_facing=%s\n' \
+    "${PRIVACY_TOTAL_SERVICES:-0}" \
+    "${PRIVACY_UNKNOWN_SERVICES:-0}" \
+    "${PRIVACY_NETWORK_FACING_SERVICES:-0}" \
+    2>/dev/null || true
 }
 
 # ----------------------------
@@ -443,7 +456,11 @@ summary_print() {
   log "RUN SUMMARY:"
 
   if [ "${PRIVACY_TOTAL_SERVICES:-0}" -gt 0 ]; then
-    log "  - $(privacy_summary_line)"
+    local privacy_line=""
+    privacy_line="$(privacy_summary_line 2>/dev/null || true)"
+    if [ -n "$privacy_line" ]; then
+      log "  - ${privacy_line}"
+    fi
   fi
   if [ "${PRIVACY_NETWORK_FACING_SERVICES:-0}" -gt 0 ] && [ "${PRIVACY_UNKNOWN_SERVICES:-0}" -gt 0 ]; then
     log "  - risk: background_services_with_network_access"

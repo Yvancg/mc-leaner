@@ -28,7 +28,12 @@
 
 # NOTE: This module uses best-effort probing across app roots and optional Homebrew.
 # It enables `set -u` and `pipefail` but avoids `set -e` to prevent aborting on expected absence/permission errors.
+
 set -uo pipefail
+
+# Suppress SIGPIPE noise when output is piped to a consumer that exits early (e.g., `head -n`).
+# Safety: logging/output ergonomics only; does not affect inspection results.
+trap '' PIPE
 
 #
 # ----------------------------
@@ -58,14 +63,16 @@ _inventory_log() {
     # shellcheck disable=SC2154
     log "$@"
   else
-    printf '%s\n' "$*"
+    # Ignore EPIPE when downstream closes early.
+    { printf '%s\n' "$*"; } 2>/dev/null || true
   fi
 }
 
 _inventory_debug() {
-  # shellcheck disable=SC2154
+  # Purpose: Best-effort verbose logging when --explain is enabled.
+  # Safety: Logging only.
   if [[ "${EXPLAIN:-false}" == "true" ]]; then
-    log "Inventory (explain): $*"
+    _inventory_log "Inventory (explain): $*"
   fi
 }
 
@@ -191,6 +198,7 @@ _inventory_add_index() {
 }
 
 
+
 _inventory_normalize_app_key() {
   # Purpose: Normalize an app name into a conservative inventory key.
   # Safety: Conservative normalization reduces false-positive ownership matches.
@@ -201,6 +209,70 @@ _inventory_normalize_app_key() {
   # strip spaces
   s="${s// /}"
   echo "$s"
+}
+
+# ----------------------------
+# Owner Normalization Helpers
+# ----------------------------
+_inventory_titlecase_token() {
+  # Purpose: Title-case a single token (ascii letters).
+  # Example: "zoom" -> "Zoom"
+  local t="${1:-}"
+  [[ -n "${t}" ]] || { printf '%s' "${t}"; return 0; }
+  local first rest
+  first="$(printf '%s' "${t}" | cut -c1 | tr '[:lower:]' '[:upper:]')"
+  rest="$(printf '%s' "${t}" | cut -c2- | tr '[:upper:]' '[:lower:]')"
+  printf '%s' "${first}${rest}"
+}
+
+_inventory_owner_from_domainish_name() {
+  # Purpose: Convert domain-like or reverse-DNS-like names into a stable vendor token.
+  # Examples:
+  #   "zoom.us" -> "Zoom"
+  #   "com.bitdefender.agent" -> "Bitdefender"
+  # Safety: Conservative; only transforms when there are no spaces and a dot is present.
+  local s="${1:-}"
+
+  # Trim
+  s="$(printf '%s' "${s}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  [[ -n "${s}" ]] || { printf '%s' ""; return 0; }
+
+  # Preserve sentinel values
+  if [[ "${s}" == "Unknown" || "${s}" == "Apple (system)" ]]; then
+    printf '%s' "${s}"
+    return 0
+  fi
+
+  # Only treat as domain-ish when there are no spaces and it contains at least one dot.
+  if [[ "${s}" == *" "* || "${s}" != *.* ]]; then
+    printf '%s' "${s}"
+    return 0
+  fi
+
+  local token="${s}"
+
+  # Drop common reverse-DNS prefixes.
+  case "${token}" in
+    com.*|org.*|net.*|io.*|app.*|co.*)
+      token="${token#*.}"
+      ;;
+    *)
+      :
+      ;;
+  esac
+
+  # Take first segment.
+  token="${token%%.*}"
+
+  # Replace separators with spaces and take the first word.
+  token="$(printf '%s' "${token}" | tr '_-' '  ' | awk '{print $1}')"
+
+  if [[ -n "${token}" ]]; then
+    _inventory_titlecase_token "${token}"
+    return 0
+  fi
+
+  printf '%s' "${s}"
 }
 
 inventory_normalize_owner_name() {
@@ -216,13 +288,17 @@ inventory_normalize_owner_name() {
 
   [[ -n "$name" ]] || { printf '%s' "$name"; return 0; }
 
+  # 0) Generic normalization for domain-like or reverse-DNS-like names.
+  # This handles cases like "zoom.us" without adding vendor-specific rules.
+  name="$(_inventory_owner_from_domainish_name "${name}")"
+
   # 1) Strong signal: apps installed in a vendor subfolder under /Applications.
   # Example: /Applications/Bitdefender/AntivirusforMac.app -> vendor=Bitdefender
   if [[ "$app_path" == /Applications/*/*.app ]]; then
     local vendor_dir=""
     vendor_dir="$(basename "$(dirname "$app_path" 2>/dev/null)" 2>/dev/null || true)"
     if [[ -n "$vendor_dir" && "$vendor_dir" != "Applications" && "$vendor_dir" != "$name" ]]; then
-      printf '%s' "$vendor_dir"
+      printf '%s' "$(_inventory_owner_from_domainish_name "${vendor_dir}")"
       return 0
     fi
   fi
@@ -236,6 +312,14 @@ inventory_normalize_owner_name() {
       ;;
     com.malwarebytes.*)
       printf '%s' "Malwarebytes"
+      return 0
+      ;;
+    us.zoom.*)
+      printf '%s' "Zoom"
+      return 0
+      ;;
+    com.google.keystone.*|com.google.GoogleUpdater.*)
+      printf '%s' "Google Keystone"
       return 0
       ;;
   esac

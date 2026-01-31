@@ -5,7 +5,12 @@
 # Safety: User-level only; defaults to dry-run; never deletes; cleanup relocates caches to backups with confirmation
 
 # NOTE: Modules run with strict mode for deterministic failures and auditability.
+
 set -euo pipefail
+
+# Suppress SIGPIPE noise when output is piped to a consumer that exits early (e.g., `head -n`).
+# Safety: logging/output ergonomics only; does not affect inspection results.
+trap '' PIPE
 
 # ----------------------------
 # Defensive Checks
@@ -35,6 +40,19 @@ run_caches_module() {
   local inventory_index_file="${5:-}"
 
   # Inputs
+  # Sanitize inventory_index_file before logging to avoid multi-line noise.
+  if [[ -n "${inventory_index_file:-}" ]]; then
+    local _inv_sane=""
+    _inv_sane="$(
+      { printf '%s\n' "${inventory_index_file}"; } 2>/dev/null \
+        | grep -Eo '(/(var/folders|tmp)/[^[:space:]]*mc-leaner_inventory\.[^[:space:]]+)' \
+        | tail -n 1
+    )" || true
+    if [[ -n "${_inv_sane:-}" ]]; then
+      inventory_index_file="${_inv_sane}"
+    fi
+  fi
+
   log "Caches: mode=${mode} apply=${apply} backup_dir=${backup_dir} explain=${explain} inventory_index=${inventory_index_file:-<none>}"
 
   # Reserved args for contract consistency (modules share a stable CLI signature).
@@ -52,10 +70,16 @@ run_caches_module() {
   _caches_finish_timing() {
     # SAFETY: must be safe under `set -u` and when invoked on early returns.
     _caches_t1="$(/bin/date +%s 2>/dev/null || echo '')"
-    if [[ -n "${_caches_t0:-}" && -n "${_caches_t1:-}" ]]; then
+
+    if [[ -n "${_caches_t0:-}" && -n "${_caches_t1:-}" ]] \
+      && [[ "${_caches_t0}" =~ ^[0-9]+$ ]] \
+      && [[ "${_caches_t1}" =~ ^[0-9]+$ ]]; then
       CACHES_DUR_S=$((_caches_t1 - _caches_t0))
+    else
+      CACHES_DUR_S=0
     fi
   }
+
   _caches_on_return() {
     EXPLAIN="${_caches_prev_explain:-false}"
     _caches_finish_timing
@@ -63,13 +87,62 @@ run_caches_module() {
   trap _caches_on_return RETURN
 
   # ----------------------------
+  # Helper: inventory path sanitizer
+  # ----------------------------
+  _caches_extract_inventory_path() {
+    # Usage: _caches_extract_inventory_path "<maybe polluted string>"
+    # Returns: best-effort single path to an existing inventory index file, else empty.
+    local s="${1:-}"
+    local cand=""
+
+    [[ -n "${s}" ]] || return 1
+
+    # 1) Exact path works
+    if [[ -f "${s}" ]]; then
+      printf '%s\n' "${s}"
+      return 0
+    fi
+
+    # 2) Extract the last plausible inventory file path from a polluted multi-line string.
+    # Matches /var/folders/.../T/mc-leaner_inventory.* or /tmp/.../mc-leaner_inventory.*
+    cand="$(
+      { printf '%s\n' "${s}"; } 2>/dev/null \
+        | grep -Eo '(/(var/folders|tmp)/[^[:space:]]*mc-leaner_inventory\.[^[:space:]]+)' \
+        | tail -n 1
+    )" || true
+
+    if [[ -n "${cand}" && -f "${cand}" ]]; then
+      printf '%s\n' "${cand}"
+      return 0
+    fi
+
+    return 1
+  }
+
+  # ----------------------------
   # Helper: _inventory_ready
   # ----------------------------
   _inventory_ready() {
-    if [[ -n "${inventory_index_file:-}" && -f "${inventory_index_file:-}" ]]; then
+    # Purpose: determine whether an inventory index file is available and usable.
+    # Safety: read-only; sanitizes polluted values (e.g., when caller captured logs into the arg).
+
+    local p=""
+
+    # Prefer the explicit arg, but sanitize it.
+    if p="$(_caches_extract_inventory_path "${inventory_index_file:-}" 2>/dev/null)"; then
+      inventory_index_file="${p}"
       return 0
     fi
-    [[ "${INVENTORY_READY:-false}" == "true" ]] && [[ -n "${INVENTORY_INDEX_FILE:-}" ]] && [[ -f "${INVENTORY_INDEX_FILE:-}" ]]
+
+    # Fallback to runner-exported env vars.
+    if [[ "${INVENTORY_READY:-false}" == "true" ]]; then
+      if p="$(_caches_extract_inventory_path "${INVENTORY_INDEX_FILE:-}" 2>/dev/null)"; then
+        export INVENTORY_INDEX_FILE="${p}"
+        return 0
+      fi
+    fi
+
+    return 1
   }
 
   # ----------------------------
@@ -90,11 +163,6 @@ run_caches_module() {
   # ----------------------------
   # Helper: Size and Timestamps
   # ----------------------------
-  _du_kb() {
-    # Purpose: Return size in KB for a path (macOS-compatible du invocation).
-    du -sk "$1" 2>/dev/null | awk '{print $1}'
-  }
-
   _mtime() {
     # Purpose: Return last modified time as a readable string (macOS stat).
     local epoch
@@ -263,6 +331,23 @@ run_caches_module() {
   }
 
   # ----------------------------
+  # Tempfile helper
+  # ----------------------------
+  _caches_tmpfile() {
+    # Purpose: create a temp file path (stdout only) without relying on shared tmpfile helper.
+    # Safety: creates an empty temp file and returns its path.
+    local t=""
+
+    t="$(/usr/bin/mktemp -t mc-leaner.XXXXXX 2>/dev/null || true)"
+    if [[ -z "${t}" ]]; then
+      t="/tmp/mc-leaner.${RANDOM}.${RANDOM}"
+      : >"${t}" 2>/dev/null || true
+    fi
+
+    printf '%s\n' "${t}"
+  }
+
+  # ----------------------------
   # Scan Targets (User-Level Only)
   # ----------------------------
   local home="$HOME"
@@ -270,22 +355,27 @@ run_caches_module() {
   local scanned_dirs=0
   local over_threshold=0
   local below_report_file
-  below_report_file="$(tmpfile)"
+  below_report_file="$(_caches_tmpfile 2>/dev/null | tail -n 1)"
 
   # Collect candidates as "kb<TAB>path" so we can de-dup safely later.
   local candidate_list_file
-  candidate_list_file="$(tmpfile)"
+  candidate_list_file="$(_caches_tmpfile 2>/dev/null | tail -n 1)"
 
   # Best-effort cleanup of temp files created by this module.
   _caches_cleanup_tmp() {
     # SAFETY: this EXIT trap can run after `run_caches_module` returns.
-    # Use `:-` defaults to avoid `set -u` unbound-variable failures.
+    # Use locals so we do not re-expand variables multiple times under `set -u`.
+    local _bf="${below_report_file:-}"
+    local _cf="${candidate_list_file:-}"
+    local _ckp="${candidates_kb_path:-}"
+    local _rf="${report_file:-}"
+
     rm -f \
-      "${below_report_file:-}" \
-      "${candidate_list_file:-}" \
-      "${candidates_kb_path:-}" \
-      "${report_file:-}" \
-      "${report_file:-}.sorted" \
+      "${_bf}" \
+      "${_cf}" \
+      "${_ckp}" \
+      "${_rf}" \
+      "${_rf}.sorted" \
       2>/dev/null || true
   }
   trap _caches_cleanup_tmp EXIT
@@ -301,8 +391,9 @@ run_caches_module() {
     # Avoid glob expansion (can hit arg limits on large systems).
     # du output: <kb>\t<path>
     while IFS=$'\t' read -r kb d; do
-      [[ -n "$kb" && -n "$d" ]] || continue
-      [[ -d "$d" ]] || continue
+      [[ -n "${kb:-}" && -n "${d:-}" ]] || continue
+      [[ "${kb}" =~ ^[0-9]+$ ]] || continue
+      [[ -d "${d}" ]] || continue
 
       # Skip Apple/system container caches (noise, not user cleanup material)
       if [[ "$d" == "$home/Library/Containers/com.apple."*"/Data/Library/Caches"* ]]; then
@@ -328,8 +419,9 @@ run_caches_module() {
     explain_log "Caches (explain): finding container cache dirs"
 
     while IFS=$'\t' read -r kb d; do
-      [[ -n "$kb" && -n "$d" ]] || continue
-      [[ -d "$d" ]] || continue
+      [[ -n "${kb:-}" && -n "${d:-}" ]] || continue
+      [[ "${kb}" =~ ^[0-9]+$ ]] || continue
+      [[ -d "${d}" ]] || continue
 
       # Skip Apple/system container caches (noise, not user cleanup material)
       if [[ "$d" == "$home/Library/Containers/com.apple."*"/Data/Library/Caches" ]]; then
@@ -354,7 +446,7 @@ run_caches_module() {
 
   # De-dup candidate paths (same cache dir may be discovered via multiple roots).
   local candidates_kb_path
-  candidates_kb_path="$(tmpfile)"
+  candidates_kb_path="$(_caches_tmpfile 2>/dev/null | tail -n 1)"
 
   if [[ -s "$candidate_list_file" ]]; then
     # Sort by path (2nd field) then keep first occurrence per path.
@@ -392,12 +484,13 @@ run_caches_module() {
   local flagged_items=()
   local flagged_ids=()
   local move_failures=()
-  report_file="$(tmpfile)"
+  report_file="$(_caches_tmpfile 2>/dev/null | tail -n 1)"
   local moved_count=0
 
   while IFS=$'\t' read -r kb d; do
-    [[ -n "$kb" && -n "$d" ]] || continue
-    [[ -d "$d" ]] || continue
+    [[ -n "${kb:-}" && -n "${d:-}" ]] || continue
+    [[ "${kb}" =~ ^[0-9]+$ ]] || continue
+    [[ -d "${d}" ]] || continue
 
     local mb mod owner
     mb=$((kb / 1024))
@@ -446,6 +539,7 @@ run_caches_module() {
         | sort -nr \
         | head -n 3 \
         | while read -r skb sub; do
+            [[ "${skb:-}" =~ ^[0-9]+$ ]] || continue
             local smb=$((skb / 1024))
             explain_log "    - ${smb}MB | ${sub}"
           done
@@ -512,7 +606,7 @@ run_caches_module() {
   CACHES_THRESHOLD_MB="${min_mb}"
 
   # Export flagged identifiers list (paths) for run summary consumption.
-  CACHES_FLAGGED_IDS_LIST="$(printf '%s\n' "${flagged_ids[@]}")"
+  CACHES_FLAGGED_IDS_LIST="$({ printf '%s\n' "${flagged_ids[@]}"; } 2>/dev/null || true)"
 
   # Ensure timing is computed before returning from the module.
   _caches_on_return

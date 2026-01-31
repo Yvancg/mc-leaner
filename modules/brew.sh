@@ -9,6 +9,10 @@
 # NOTE: Modules run with strict mode for deterministic failures and auditability.
 set -euo pipefail
 
+# Suppress SIGPIPE noise and cascading stdout corruption when output is piped to a consumer that exits early
+# (e.g., `head -n`, `rg -m`). Safety: logging ergonomics only; does not change inspection logic/results.
+trap '' PIPE
+
 # ----------------------------
 # Summary Buckets
 # ----------------------------
@@ -37,14 +41,21 @@ fi
 # ----------------------------
 # Helpers
 # ----------------------------
-
 if ! type tmpfile >/dev/null 2>&1; then
   tmpfile() {
     # Purpose: Create a temp file path.
     # Safety: Creates an empty temp file.
-    mktemp -t mc-leaner.XXXXXX
+    # Important: must not write anything except the path to stdout.
+    mktemp -t mc-leaner.XXXXXX 2>/dev/null
   }
 fi
+
+_brew_tmpfile() {
+  # Purpose: Create a temp file path for this module only.
+  # Safety: Creates an empty temp file.
+  # Rationale: Do not call shared tmpfile() in command substitution because it may log to stdout.
+  mktemp -t mc-leaner.XXXXXX 2>/dev/null
+}
 
 _brew_array_len() {
   # Purpose: safe array length under `set -u` (returns 0 if unset)
@@ -69,7 +80,6 @@ _brew_array_copy() {
   # Inputs: src var name, dest var name
   local src="$1"
   local dest="$2"
-
   # Same nuance as `_brew_array_len`: declared-but-unset arrays must be treated as empty.
   if declare -p "$src" >/dev/null 2>&1; then
     if eval '[[ ${'"$src"'[@]+x} ]]'; then
@@ -81,6 +91,7 @@ _brew_array_copy() {
     eval "$dest=()"
   fi
 }
+
 _brew_exists() {
   # Purpose: check whether Homebrew is installed
   command -v brew >/dev/null 2>&1
@@ -94,17 +105,39 @@ _brew_prefix() {
 
 _brew_kb_to_mb() {
   # Purpose: convert KB to MB (integer)
-  local kb="${1:-0}"
+  # Safety: must be robust if caller passes non-numeric text (e.g., contaminated stdout).
+  local kb_raw="${1:-0}"
+  local kb="0"
+  # Strip whitespace
+  kb_raw="$(printf '%s' "${kb_raw}" | tr -d '[:space:]' 2>/dev/null || true)"
+  # Accept only digits; fail closed to 0.
+  if [[ -n "${kb_raw}" && "${kb_raw}" =~ ^[0-9]+$ ]]; then
+    kb="${kb_raw}"
+  else
+    kb="0"
+  fi
+
   echo $((kb / 1024))
 }
 
 _brew_dir_mb() {
   # Purpose: return directory size in MB (integer)
   # Notes: du -sk is stable across macOS
+  # Safety: tolerate non-numeric outputs (treat as 0).
   local p="$1"
-  local kb
-  kb=$(du -sk "$p" 2>/dev/null | awk '{print $1}' || echo "0")
-  _brew_kb_to_mb "$kb"
+  local kb="0"
+  local du_out=""
+
+  du_out="$(du -sk "$p" 2>/dev/null | awk '{print $1}' 2>/dev/null || true)"
+  du_out="$(printf '%s' "${du_out}" | tr -d '[:space:]' 2>/dev/null || true)"
+
+  if [[ -n "${du_out}" && "${du_out}" =~ ^[0-9]+$ ]]; then
+    kb="${du_out}"
+  else
+    kb="0"
+  fi
+
+  _brew_kb_to_mb "${kb}"
 }
 
 _brew_sorted_unique_lines() {
@@ -190,8 +223,9 @@ _brew_top_n_largest_formulae() {
   [[ -d "$cellar" ]] || return 0
 
   local tmp
-  tmp="$(tmpfile)"
-  : > "$tmp"
+  tmp="$(_brew_tmpfile)"
+  [[ -n "${tmp:-}" ]] || return 0
+  : > "${tmp}"
 
   # `du -sk Cellar/*` yields: <kb> <path>
   # Convert to MB and capture the formula name from the directory basename.
@@ -204,11 +238,11 @@ _brew_top_n_largest_formulae() {
         [[ -n "$f" ]] || continue
         local mb
         mb="$(_brew_kb_to_mb "$kb")"
-        printf "%s|%s\n" "$mb" "$f" >> "$tmp"
+        { printf "%s|%s\n" "$mb" "$f"; } >> "${tmp}" 2>/dev/null || true
       done
 
   # Sort by size desc and print top N.
-  sort -t '|' -k1,1nr "$tmp" 2>/dev/null | head -n "$n" | while IFS='|' read -r mb f; do
+  sort -t '|' -k1,1nr "${tmp}" 2>/dev/null | head -n "$n" | while IFS='|' read -r mb f; do
     [[ -n "$f" ]] || continue
 
     # Versions: avoid `brew` calls; list version directories under Cellar/<formula>.
@@ -239,18 +273,19 @@ _brew_cache_downloads_summary() {
 
   if [[ "${EXPLAIN:-false}" == "true" ]]; then
     # Top 3 subfolders by size (best-effort)
-    local tmp
-    tmp="$(tmpfile)"
-    : > "$tmp"
-    find "$cache_root" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | while IFS= read -r d; do
-      local mb
-      mb="$(_brew_dir_mb "$d")"
-      printf "%s|%s\n" "$mb" "$d" >> "$tmp"
-    done
-    sort -t '|' -k1,1nr "$tmp" 2>/dev/null | head -n 3 | while IFS='|' read -r mb p; do
-      [[ -n "$p" ]] || continue
-      explain_log "  subfolder: ${mb}MB | ${p}"
-    done
+    # Avoid temp files and redirections here to prevent weird failure modes under piped output.
+    find "$cache_root" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null \
+      | while IFS= read -r -d '' d; do
+          local mb
+          mb="$(_brew_dir_mb "$d")"
+          { printf "%s|%s\n" "$mb" "$d"; } 2>/dev/null || true
+        done \
+      | sort -t '|' -k1,1nr 2>/dev/null \
+      | head -n 3 2>/dev/null \
+      | while IFS='|' read -r mb p; do
+          [[ -n "${p:-}" ]] || continue
+          explain_log "  cache subdir: ${mb}MB | ${p}"
+        done
   fi
 
   [[ -d "$downloads_dir" ]] || return 0

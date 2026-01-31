@@ -62,8 +62,8 @@ trap '' PIPE
 
 if ! command -v log >/dev/null 2>&1; then
   log() {
-    # Ignore EPIPE when downstream closes early (e.g., `rg -m`).
-    printf '%s\n' "$*" 2>/dev/null || true
+    # Ignore EPIPE when downstream closes early (e.g., `head -n`, `rg -m`).
+    { printf '%s\n' "$*"; } 2>/dev/null || true
   }
 fi
 
@@ -180,8 +180,10 @@ _startup_plist_xml_find_string_after_key() {
   [[ -n "$xml" ]] || return 0
 
   # Search for: <key>KEY</key> ... <string>VALUE</string>
-  # Take the first match.
-  printf '%s' "$xml" | sed -n "s/.*<key>${key}<\/key>[[:space:]]*<string>\([^<]*\)<\/string>.*/\1/p" | head -n 1
+  # Take the first match, suppressing SIGPIPE and stderr.
+  { printf '%s' "$xml"; } 2>/dev/null \
+    | sed -n "s/.*<key>${key}<\/key>[[:space:]]*<string>\([^<]*\)<\/string>.*/\1/p; q" 2>/dev/null \
+    || true
 }
 
 _startup_plist_xml_find_first_programarguments_string() {
@@ -195,11 +197,11 @@ _startup_plist_xml_find_first_programarguments_string() {
   [[ -n "$xml" ]] || return 0
 
   # Extract the first ProgramArguments array block, then take its first <string>.
-  printf '%s' "$xml" \
-    | tr '\n' ' ' \
-    | sed -n 's/.*<key>ProgramArguments<\/key>[[:space:]]*<array>\(.*\)<\/array>.*/\1/p' \
-    | sed -n 's/.*<string>\([^<]*\)<\/string>.*/\1/p' \
-    | head -n 1
+  { printf '%s' "$xml"; } 2>/dev/null \
+    | tr '\n' ' ' 2>/dev/null \
+    | sed -n 's/.*<key>ProgramArguments<\/key>[[:space:]]*<array>\(.*\)<\/array>.*/\1/p' 2>/dev/null \
+    | sed -n 's/.*<string>\([^<]*\)<\/string>.*/\1/p; q' 2>/dev/null \
+    || true
 }
 
 # Extract the first string from an array key via XML (for ProgramArguments etc).
@@ -213,8 +215,8 @@ _startup_plist_extract_first_string_in_array() {
   xml="$(_startup_plist_extract_xml "${plist}" "${keypath}")"
   [[ -n "$xml" ]] || return 0
 
-  # Extract first <string>...</string> value.
-  printf '%s' "$xml" | sed -n 's/.*<string>\(.*\)<\/string>.*/\1/p' | head -n 1
+  # Extract first <string>...</string> value, SIGPIPE-safe.
+  { printf '%s' "$xml"; } 2>/dev/null | sed -n 's/.*<string>\(.*\)<\/string>.*/\1/p; q' 2>/dev/null || true
 }
 
 _startup_infer_timing_from_plist() {
@@ -246,9 +248,9 @@ _startup_plist_label() {
 
   label="$(_startup_plist_extract_raw "${plist}" Label | sed 's/^\s*//;s/\s*$//')"
   if [[ -n "${label}" ]]; then
-    echo "${label}"
+    { printf '%s\n' "${label}"; } 2>/dev/null || true
   else
-    basename "${plist}" | sed 's/\.plist$//'
+    { basename "${plist}" | sed 's/\.plist$//'; } 2>/dev/null || true
   fi
 }
 
@@ -259,35 +261,35 @@ _startup_plist_exec() {
 
   program="$(_startup_plist_extract_raw "${plist}" Program | sed 's/^\s*//;s/\s*$//')"
   if [[ -n "${program}" ]]; then
-    echo "${program}"
+    { printf '%s\n' "${program}"; } 2>/dev/null || true
     return 0
   fi
 
   # Use ProgramArguments[0] when present.
   argv0="$(_startup_plist_extract_raw "${plist}" ProgramArguments.0 | sed 's/^\s*//;s/\s*$//')"
   if [[ -n "${argv0}" ]]; then
-    echo "${argv0}"
+    { printf '%s\n' "${argv0}"; } 2>/dev/null || true
     return 0
   fi
 
   # Fallback: parse ProgramArguments as XML and take the first string.
   argv0="$(_startup_plist_extract_first_string_in_array "${plist}" ProgramArguments | sed 's/^\s*//;s/\s*$//')"
   if [[ -n "${argv0}" ]]; then
-    echo "${argv0}"
+    { printf '%s\n' "${argv0}"; } 2>/dev/null || true
     return 0
   fi
 
   # Fallback: some plists use BundleProgram.
   program="$(_startup_plist_extract_raw "${plist}" BundleProgram | sed 's/^\s*//;s/\s*$//')"
   if [[ -n "${program}" ]]; then
-    echo "${program}"
+    { printf '%s\n' "${program}"; } 2>/dev/null || true
     return 0
   fi
 
   # Fallback: XPC services sometimes declare a ServiceExecutable.
   program="$(_startup_plist_extract_raw "${plist}" XPCService.ServiceExecutable | sed 's/^\s*//;s/\s*$//')"
   if [[ -n "${program}" ]]; then
-    echo "${program}"
+    { printf '%s\n' "${program}"; } 2>/dev/null || true
     return 0
   fi
 
@@ -300,17 +302,17 @@ _startup_plist_exec() {
 
   argv0="$(_startup_plist_xml_find_first_programarguments_string "${plist}" | sed 's/^\s*//;s/\s*$//')"
   if [[ -n "${argv0}" ]]; then
-    echo "${argv0}"
+    { printf '%s\n' "${argv0}"; } 2>/dev/null || true
     return 0
   fi
 
   program="$(_startup_plist_xml_find_string_after_key "${plist}" ServiceExecutable | sed 's/^\s*//;s/\s*$//')"
   if [[ -n "${program}" ]]; then
-    echo "${program}"
+    { printf '%s\n' "${program}"; } 2>/dev/null || true
     return 0
   fi
 
-  echo ""
+  { printf '%s\n' ""; } 2>/dev/null || true
 }
 
 _startup_inventory_owner() {
@@ -320,7 +322,7 @@ _startup_inventory_owner() {
   local exec_path="$2"
 
   if _startup_is_apple_owner "${label}"; then
-    echo "Apple (system)|label-prefix|high"
+    { printf '%s\n' "Apple (system)|label-prefix|high"; } 2>/dev/null || true
     return 0
   fi
 
@@ -329,7 +331,7 @@ _startup_inventory_owner() {
   if declare -F inventory_lookup_owner_by_bundle_id >/dev/null 2>&1; then
     owner="$(inventory_lookup_owner_by_bundle_id "${label}" 2>/dev/null || true)"
     if [[ -n "${owner}" ]]; then
-      echo "${owner}|bundle-id|high"
+      { printf '%s\n' "${owner}|bundle-id|high"; } 2>/dev/null || true
       return 0
     fi
   fi
@@ -337,7 +339,7 @@ _startup_inventory_owner() {
   if declare -F inventory_lookup_owner_by_path >/dev/null 2>&1 && [[ -n "${exec_path}" ]]; then
     owner="$(inventory_lookup_owner_by_path "${exec_path}" 2>/dev/null || true)"
     if [[ -n "${owner}" ]]; then
-      echo "${owner}|path|high"
+      { printf '%s\n' "${owner}|path|high"; } 2>/dev/null || true
       return 0
     fi
   fi
@@ -345,7 +347,7 @@ _startup_inventory_owner() {
   if declare -F inventory_lookup_owner_by_name >/dev/null 2>&1; then
     owner="$(inventory_lookup_owner_by_name "${label}" 2>/dev/null || true)"
     if [[ -n "${owner}" ]]; then
-      echo "${owner}|name|medium"
+      { printf '%s\n' "${owner}|name|medium"; } 2>/dev/null || true
       return 0
     fi
   fi
@@ -353,7 +355,7 @@ _startup_inventory_owner() {
   if declare -F inventory_lookup_brew_service_owner >/dev/null 2>&1; then
     owner="$(inventory_lookup_brew_service_owner "${label}" 2>/dev/null || true)"
     if [[ -n "${owner}" ]]; then
-      echo "Homebrew (${owner})|brew-service|medium"
+      { printf '%s\n' "Homebrew (${owner})|brew-service|medium"; } 2>/dev/null || true
       return 0
     fi
   fi
@@ -367,7 +369,7 @@ _startup_inventory_owner() {
       p_owner="${prefix_meta%%$'\t'*}"
       p_how="${prefix_meta#*$'\t'}"; p_how="${p_how%%$'\t'*}"
       p_conf="${prefix_meta##*$'\t'}"
-      echo "${p_owner}|${p_how}|${p_conf}"
+      { printf '%s\n' "${p_owner}|${p_how}|${p_conf}"; } 2>/dev/null || true
       return 0
     fi
   fi
@@ -376,11 +378,11 @@ _startup_inventory_owner() {
   local mapped=""
   mapped="$(_startup_label_prefix_owner "${label}")"
   if [[ -n "$mapped" ]]; then
-    echo "$mapped"
+    { printf '%s\n' "$mapped"; } 2>/dev/null || true
     return 0
   fi
 
-  echo "Unknown|none|low"
+  { printf '%s\n' "Unknown|none|low"; } 2>/dev/null || true
 }
 
 # ----------------------------
@@ -388,7 +390,7 @@ _startup_inventory_owner() {
 # ----------------------------
 _startup_lc() {
   # Lowercase helper (bash 3.2 compatible)
-  echo "$1" | tr '[:upper:]' '[:lower:]'
+  { printf '%s\n' "$1"; } 2>/dev/null | tr '[:upper:]' '[:lower:]'
 }
 
 _startup_infer_impact() {
@@ -736,12 +738,10 @@ run_startup_module() {
   _startup_scan_login_items "${explain}"
 
   # Ignore EPIPE when downstream closes early (e.g., `head -n`).
+  STARTUP_FLAGGED_IDS_LIST=""
   if [[ ${#STARTUP_FLAGGED_IDS[@]} -gt 0 ]]; then
-    STARTUP_FLAGGED_IDS_LIST="$(printf '%s\n' "${STARTUP_FLAGGED_IDS[@]}" 2>/dev/null || true)"
-    # Trim a single trailing newline if present.
+    STARTUP_FLAGGED_IDS_LIST="$({ printf '%s\n' "${STARTUP_FLAGGED_IDS[@]}"; } 2>/dev/null || true)"
     STARTUP_FLAGGED_IDS_LIST="${STARTUP_FLAGGED_IDS_LIST%$'\n'}"
-  else
-    STARTUP_FLAGGED_IDS_LIST=""
   fi
 
   # Estimated risk (v2.2.0): conservative summary hinting.

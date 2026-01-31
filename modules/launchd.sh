@@ -64,7 +64,6 @@ run_launchd_module() {
       LAUNCHD_DUR_S=0
     fi
   }
-  trap _launchd_finish_timing RETURN
 
   local flagged_count=0
   local flagged_items=()
@@ -85,7 +84,12 @@ run_launchd_module() {
       [[ -n "$f" && -e "$f" ]] && rm -f "$f" 2>/dev/null || true
     done
   }
-  trap _launchd_tmp_cleanup RETURN
+  _launchd_on_return() {
+    # Ensure we always compute duration and remove temp files.
+    _launchd_finish_timing
+    _launchd_tmp_cleanup
+  }
+  trap _launchd_on_return RETURN
 
   # Precompute inventory keys for fast membership checks (performance)
   if [[ -n "${inventory_index_file}" && -f "${inventory_index_file}" ]]; then
@@ -495,8 +499,14 @@ run_launchd_module() {
   if [[ "$orphan_found" -eq 0 ]]; then
     log "Launchd: no orphaned plists found (by heuristics)."
     explain_log "Launchd: checked ${checked} plists."
+
+    # Export summary variables for the orchestrator, even when nothing is flagged.
+    LAUNCHD_FLAGGED_IDS_LIST=""
+    LAUNCHD_FLAGGED_IDS_LIST="${LAUNCHD_FLAGGED_IDS_LIST%$'\n'}"
+    LAUNCHD_FLAGGED_COUNT="${flagged_count}"
+    LAUNCHD_DUR_S="${LAUNCHD_DUR_S:-0}"
+
     _launchd_summary_emit "${checked}"
-    _launchd_finish_timing
     return 0
   fi
 
@@ -523,9 +533,9 @@ run_launchd_module() {
 
   # Export flagged identifiers list for run summary consumption.
   LAUNCHD_FLAGGED_IDS_LIST="$({ printf '%s\n' "${flagged_items[@]}"; } 2>/dev/null || true)"
+  LAUNCHD_FLAGGED_IDS_LIST="${LAUNCHD_FLAGGED_IDS_LIST%$'\n'}"
   LAUNCHD_FLAGGED_COUNT="${flagged_count}"
   LAUNCHD_DUR_S="${LAUNCHD_DUR_S:-0}"
 
-  _launchd_finish_timing
   _launchd_summary_emit "${checked}"
 }

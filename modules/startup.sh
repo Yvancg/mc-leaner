@@ -15,44 +15,21 @@ trap '' PIPE
 # Note: Kept near the top so simple greps and partial prints (e.g., `sed -n '1,260p'`) will find it.
 
 # ----------------------------
-# Contract: startup module output + summary (v2.2.0)
+# Contract: startup output + summary (v2.2.0+)
 # ----------------------------
-# Safety
-#   - Inspection-only. Never modifies launchd, login items, or system state.
-#   - `mode=clean` or `apply=true` must still perform a scan only.
+# Safety: inspection-only. `mode=clean` and `apply=true` still scan only.
 #
-# Item line format (v2.2.0+; existing fields are stable; new fields may be appended only)
-#   STARTUP? <timing> | source: <source> | owner: <owner> | conf: <conf> | label: <label> | exec: <exec>
-#   (v2.2.0+) appends: `impact: <impact>` immediately after `conf:`
+# Item format:
+#   STARTUP? <timing> | source: <source> | owner: <owner> | conf: <conf> | impact: <impact> | label: <label> | exec: <exec>
 #
-# Required fields
-#   - timing: boot | login | on-demand
-#   - source: LaunchAgent | LaunchDaemon | LoginItem
-#   - owner: Apple (system) | <vendor/product string> | Unknown
-#   - conf: high | medium | low
-#   - impact (v2.2.0+): low | medium | high
-#   - label: best-effort identifier (launchd Label or plist basename; login item name)
-#   - exec: best-effort executable path or '-' when unavailable
-#
-# Output guarantees
-#   - Each discovered startup surface item emits exactly one STARTUP? line.
-#   - No STARTUP? line is suppressed due to errors; failures degrade to best-effort fields (e.g., exec='-').
-#   - `impact` (v2.2.0+) is best-effort heuristic attribution only; it is not a recommendation and must not imply action.
-#
-# Summary globals (exported for mc-leaner.sh RUN SUMMARY)
-#   - STARTUP_CHECKED_COUNT: integer (items inspected)
-#   - STARTUP_FLAGGED_COUNT: integer (items flagged)
-#   - STARTUP_BOOT_FLAGGED_COUNT: integer
-#   - STARTUP_LOGIN_FLAGGED_COUNT: integer (includes on-demand items)
-#   - STARTUP_FLAGGED_IDS_LIST: newline-separated identifiers (labels or names)
-#   - STARTUP_DUR_S (v2.2.0+): integer seconds (best-effort; wall clock duration for this module). May be unset if timing is disabled by the runner.
-#
-# RUN SUMMARY expectations (rendered by the runner)
-#   startup: inspected=<n> flagged=<n>
-#     boot: flagged=<n>
-#     login: flagged=<n>
-#     estimated_risk=<low|medium|high>
-#   risk: startup_items_may_slow_boot        # only when boot_flagged > 0
+# Exports (for RUN SUMMARY):
+#   STARTUP_CHECKED_COUNT
+#   STARTUP_FLAGGED_COUNT
+#   STARTUP_BOOT_FLAGGED_COUNT
+#   STARTUP_LOGIN_FLAGGED_COUNT
+#   STARTUP_FLAGGED_IDS_LIST (newline-delimited)
+#   STARTUP_DUR_S (best-effort seconds)
+#   STARTUP_ESTIMATED_RISK (low|medium|high)
 
 # ----------------------------
 # Defensive Checks
@@ -134,6 +111,14 @@ _startup_label_prefix_owner() {
       echo "Zoom|label-prefix-map|medium"
       return 0
       ;;
+    com.malwarebytes.*)
+      echo "Malwarebytes|label-prefix-map|medium"
+      return 0
+      ;;
+    com.bitdefender.*)
+      echo "Bitdefender|label-prefix-map|medium"
+      return 0
+      ;;
     com.google.keystone.*|com.google.GoogleUpdater.*)
       echo "Google Keystone|label-prefix-map|medium"
       return 0
@@ -169,55 +154,6 @@ _startup_plist_to_xml() {
   /usr/bin/plutil -convert xml1 -o - "${plist}" 2>/dev/null || true
 }
 
-_startup_plist_xml_find_string_after_key() {
-  # Usage: _startup_plist_xml_find_string_after_key <plist> <key>
-  # Purpose: Best-effort: find the first <string> following a <key>NAME</key> anywhere in the plist XML.
-  # Safety: Read-only; heuristic.
-  local plist="$1" key="$2"
-  local xml=""
-
-  xml="$(_startup_plist_to_xml "${plist}")"
-  [[ -n "$xml" ]] || return 0
-
-  # Search for: <key>KEY</key> ... <string>VALUE</string>
-  # Take the first match, suppressing SIGPIPE and stderr.
-  { printf '%s' "$xml"; } 2>/dev/null \
-    | sed -n "s/.*<key>${key}<\/key>[[:space:]]*<string>\([^<]*\)<\/string>.*/\1/p; q" 2>/dev/null \
-    || true
-}
-
-_startup_plist_xml_find_first_programarguments_string() {
-  # Usage: _startup_plist_xml_find_first_programarguments_string <plist>
-  # Purpose: Find the first <string> within the first ProgramArguments <array> anywhere in the plist.
-  # Safety: Read-only; heuristic.
-  local plist="$1"
-  local xml=""
-
-  xml="$(_startup_plist_to_xml "${plist}")"
-  [[ -n "$xml" ]] || return 0
-
-  # Extract the first ProgramArguments array block, then take its first <string>.
-  { printf '%s' "$xml"; } 2>/dev/null \
-    | tr '\n' ' ' 2>/dev/null \
-    | sed -n 's/.*<key>ProgramArguments<\/key>[[:space:]]*<array>\(.*\)<\/array>.*/\1/p' 2>/dev/null \
-    | sed -n 's/.*<string>\([^<]*\)<\/string>.*/\1/p; q' 2>/dev/null \
-    || true
-}
-
-# Extract the first string from an array key via XML (for ProgramArguments etc).
-_startup_plist_extract_first_string_in_array() {
-  # Usage: _startup_plist_extract_first_string_in_array <plist> <keypath>
-  # Purpose: When raw extraction of array elements fails, fall back to XML and take the first <string>.
-  # Safety: Read-only.
-  local plist="$1" keypath="$2"
-  local xml=""
-
-  xml="$(_startup_plist_extract_xml "${plist}" "${keypath}")"
-  [[ -n "$xml" ]] || return 0
-
-  # Extract first <string>...</string> value, SIGPIPE-safe.
-  { printf '%s' "$xml"; } 2>/dev/null | sed -n 's/.*<string>\(.*\)<\/string>.*/\1/p; q' 2>/dev/null || true
-}
 
 _startup_infer_timing_from_plist() {
   # Heuristic timing: boot | login | on-demand.
@@ -256,8 +192,9 @@ _startup_plist_label() {
 
 _startup_plist_exec() {
   # Best-effort: Program or first ProgramArguments element.
+  # Performance: keep raw plutil extracts on the fast path; only convert to full XML once if needed.
   local plist="$1"
-  local program="" argv0=""
+  local program="" argv0="" xml=""
 
   program="$(_startup_plist_extract_raw "${plist}" Program | sed 's/^\s*//;s/\s*$//')"
   if [[ -n "${program}" ]]; then
@@ -267,13 +204,6 @@ _startup_plist_exec() {
 
   # Use ProgramArguments[0] when present.
   argv0="$(_startup_plist_extract_raw "${plist}" ProgramArguments.0 | sed 's/^\s*//;s/\s*$//')"
-  if [[ -n "${argv0}" ]]; then
-    { printf '%s\n' "${argv0}"; } 2>/dev/null || true
-    return 0
-  fi
-
-  # Fallback: parse ProgramArguments as XML and take the first string.
-  argv0="$(_startup_plist_extract_first_string_in_array "${plist}" ProgramArguments | sed 's/^\s*//;s/\s*$//')"
   if [[ -n "${argv0}" ]]; then
     { printf '%s\n' "${argv0}"; } 2>/dev/null || true
     return 0
@@ -293,23 +223,50 @@ _startup_plist_exec() {
     return 0
   fi
 
-  # Final fallback: search anywhere in the plist XML (handles nested dicts seen in some agents/XPC services).
-  program="$(_startup_plist_xml_find_string_after_key "${plist}" Program | sed 's/^\s*//;s/\s*$//')"
-  if [[ -n "${program}" ]]; then
-    echo "${program}"
-    return 0
+  # Next fallback: targeted XML extraction for ProgramArguments (avoid full-plist conversion when possible).
+  # Behavior: best-effort only; preserves existing precedence and outputs.
+  local pa_xml=""
+  pa_xml="$(_startup_plist_extract_xml \"${plist}\" ProgramArguments)"
+  if [[ -n "${pa_xml}" ]]; then
+    argv0="$({ printf '%s' "${pa_xml}"; } 2>/dev/null | sed -n 's/.*<string>\([^<]*\)<\/string>.*/\1/p; q' 2>/dev/null || true)"
+    argv0="$(printf '%s' "${argv0}" | sed 's/^\s*//;s/\s*$//')"
+    if [[ -n "${argv0}" ]]; then
+      { printf '%s\n' "${argv0}"; } 2>/dev/null || true
+      return 0
+    fi
   fi
 
-  argv0="$(_startup_plist_xml_find_first_programarguments_string "${plist}" | sed 's/^\s*//;s/\s*$//')"
-  if [[ -n "${argv0}" ]]; then
-    { printf '%s\n' "${argv0}"; } 2>/dev/null || true
-    return 0
-  fi
+  # Final fallback: convert the plist to XML once and do best-effort parsing.
+  xml="$(_startup_plist_to_xml "${plist}")"
+  if [[ -n "${xml}" ]]; then
+    program="$({ printf '%s' "${xml}"; } 2>/dev/null \
+      | sed -n 's/.*<key>Program<\/key>[[:space:]]*<string>\([^<]*\)<\/string>.*/\1/p; q' 2>/dev/null \
+      || true)"
+    program="$(printf '%s' "${program}" | sed 's/^\s*//;s/\s*$//')"
+    if [[ -n "${program}" ]]; then
+      { printf '%s\n' "${program}"; } 2>/dev/null || true
+      return 0
+    fi
 
-  program="$(_startup_plist_xml_find_string_after_key "${plist}" ServiceExecutable | sed 's/^\s*//;s/\s*$//')"
-  if [[ -n "${program}" ]]; then
-    { printf '%s\n' "${program}"; } 2>/dev/null || true
-    return 0
+    argv0="$({ printf '%s' "${xml}"; } 2>/dev/null \
+      | tr '\n' ' ' 2>/dev/null \
+      | sed -n 's/.*<key>ProgramArguments<\/key>[[:space:]]*<array>\(.*\)<\/array>.*/\1/p' 2>/dev/null \
+      | sed -n 's/.*<string>\([^<]*\)<\/string>.*/\1/p; q' 2>/dev/null \
+      || true)"
+    argv0="$(printf '%s' "${argv0}" | sed 's/^\s*//;s/\s*$//')"
+    if [[ -n "${argv0}" ]]; then
+      { printf '%s\n' "${argv0}"; } 2>/dev/null || true
+      return 0
+    fi
+
+    program="$({ printf '%s' "${xml}"; } 2>/dev/null \
+      | sed -n 's/.*<key>ServiceExecutable<\/key>[[:space:]]*<string>\([^<]*\)<\/string>.*/\1/p; q' 2>/dev/null \
+      || true)"
+    program="$(printf '%s' "${program}" | sed 's/^\s*//;s/\s*$//')"
+    if [[ -n "${program}" ]]; then
+      { printf '%s\n' "${program}"; } 2>/dev/null || true
+      return 0
+    fi
   fi
 
   { printf '%s\n' ""; } 2>/dev/null || true

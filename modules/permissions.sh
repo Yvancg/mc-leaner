@@ -202,6 +202,29 @@ run_permissions_module() {
   # Purpose: Run environment checks and print clear diagnostics.
   # Safety: Inspection only.
 
+  # Module timing (seconds). Used by the end-of-run timing summary.
+  # Safety: logging/metrics only.
+  local _permissions_t0=""
+  local _permissions_t1=""
+  _permissions_t0="$(/bin/date +%s 2>/dev/null || echo '')"
+  PERMISSIONS_DUR_S=0
+
+  _permissions_finish_timing() {
+    _permissions_t1="$(/bin/date +%s 2>/dev/null || echo '')"
+    if [[ -n "${_permissions_t0:-}" && -n "${_permissions_t1:-}" && "${_permissions_t0}" =~ ^[0-9]+$ && "${_permissions_t1}" =~ ^[0-9]+$ ]]; then
+      PERMISSIONS_DUR_S=$((_permissions_t1 - _permissions_t0))
+    else
+      PERMISSIONS_DUR_S=0
+    fi
+  }
+
+  # Single RETURN trap per function (bash only keeps one handler per signal).
+  # Safety: timing only; no behavior changes.
+  _permissions_on_return() {
+    _permissions_finish_timing
+  }
+  trap _permissions_on_return RETURN
+
   log "Permissions: scanning execution environment (inspection-only)..."
 
   # Inputs

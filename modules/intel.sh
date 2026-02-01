@@ -19,6 +19,44 @@ run_intel_report() {
   # Inputs
   log "Intel: explain=${explain} inventory_ready=${INVENTORY_READY:-false} inventory_index=${INVENTORY_INDEX_FILE:-<none>}"
 
+  # Exported counters for end-of-run summary consumption (stable contract even when empty).
+  INTEL_FLAGGED_IDS_LIST=""
+  INTEL_FLAGGED_COUNT="0"
+
+  # Module timing (seconds). Used by the end-of-run timing summary.
+  local _intel_t0=""
+  local _intel_t1=""
+  _intel_t0="$(/bin/date +%s 2>/dev/null || echo '')"
+  INTEL_DUR_S=0
+
+  # Temp file tracking for cleanup.
+  local -a _intel_tmpfiles
+  _intel_tmpfiles=()
+
+  _intel_tmp_cleanup() {
+    local f
+    for f in "${_intel_tmpfiles[@]:-}"; do
+      [[ -n "$f" && -e "$f" ]] && rm -f "$f" 2>/dev/null || true
+    done
+  }
+
+  _intel_finish_timing() {
+    _intel_t1="$(/bin/date +%s 2>/dev/null || echo '')"
+    if [[ -n "${_intel_t0:-}" && -n "${_intel_t1:-}" && "${_intel_t0}" =~ ^[0-9]+$ && "${_intel_t1}" =~ ^[0-9]+$ ]]; then
+      INTEL_DUR_S=$((_intel_t1 - _intel_t0))
+    else
+      INTEL_DUR_S=0
+    fi
+  }
+
+  # Single RETURN trap per function (bash only keeps one handler per signal).
+  # Safety: timing + tmp cleanup only; no behavior changes.
+  _intel_on_return() {
+    _intel_finish_timing
+    _intel_tmp_cleanup
+  }
+  trap _intel_on_return RETURN
+
   # ----------------------------
   # Report Destination
   # ----------------------------
@@ -116,6 +154,7 @@ run_intel_report() {
   local tmp_out
   tmp_out=$(tmpfile)
   : > "$tmp_out" 2>/dev/null || true
+  _intel_tmpfiles+=("$tmp_out")
 
   local have_lipo="no"
   if is_cmd lipo; then
@@ -187,8 +226,11 @@ run_intel_report() {
     unique_files="$report_lines"
   fi
 
-  # Best-effort cleanup
-  rm -f "$tmp_out" 2>/dev/null || true
+  # Export authoritative count for summary/timing consumers.
+  INTEL_FLAGGED_COUNT="${unique_files}"
+  INTEL_DUR_S="${INTEL_DUR_S:-0}"
+
+  # Cleanup handled by RETURN trap.
 
   # ----------------------------
   # Preview: Top Sources and Sample Files
@@ -204,6 +246,8 @@ run_intel_report() {
     log "Intel: report written to: $out"
     log "Intel: flagged items: none"
     summary_add "intel" "flagged=0 report=${out}"
+    INTEL_FLAGGED_COUNT="0"
+    INTEL_DUR_S="${INTEL_DUR_S:-0}"
     return 0
   fi
 
@@ -286,6 +330,11 @@ run_intel_report() {
   # ----------------------------
   # Module End-of-Run Summary
   # ----------------------------
+
+  # Keep exported values stable.
+  INTEL_FLAGGED_COUNT="${unique_files}"
+  INTEL_DUR_S="${INTEL_DUR_S:-0}"
+
   if [[ "$unique_files" -eq 0 ]]; then
     summary_add "intel" "flagged=0 report=${out}"
   else

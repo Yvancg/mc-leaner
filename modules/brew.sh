@@ -558,3 +558,5 @@ run_brew_module() {
       "formulae=${n_formulae}, casks=${n_casks}, outdated_unpinned=${#BREW_OUTDATED_UNPINNED[@]}, leaves=${#BREW_LEAVES_LIST[@]}"
   fi
 }
+
+# End of module

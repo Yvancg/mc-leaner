@@ -471,3 +471,5 @@ run_logs_module() {
     log "Logs: run with --apply to relocate selected log items (user-confirmed, reversible)"
   fi
 }
+
+# End of module

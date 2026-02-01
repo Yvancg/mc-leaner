@@ -292,3 +292,5 @@ run_intel_report() {
     summary_add "intel" "flagged=${unique_files} report_lines=${report_lines} report=${out}"
   fi
 }
+
+# End of module

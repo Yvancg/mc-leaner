@@ -539,3 +539,5 @@ run_launchd_module() {
 
   _launchd_summary_emit "${checked}"
 }
+
+# End of module

@@ -713,3 +713,5 @@ _path_mtime_human() {
     date -r "$epoch" "+%Y-%m-%d %H:%M:%S" 2>/dev/null || echo "unknown"
   fi
 }
+
+# End of module

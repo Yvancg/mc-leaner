@@ -139,4 +139,85 @@ move_attempt() {
   return 0
 }
 
+# ----------------------------
+# Symlink resolution
+# ----------------------------
+
+# Purpose: Resolve a symlink chain to its final physical target.
+# Contract:
+#   fs_resolve_symlink_target_physical <path>
+# Output:
+#   Prints resolved absolute path, or empty string on failure.
+# Safety:
+#   Read-only. Best-effort. Fail-closed.
+fs_resolve_symlink_target_physical() {
+  local p="$1"
+  local max_depth=40
+  local i=0
+
+  [[ -n "$p" ]] || return 0
+  [[ -e "$p" || -L "$p" ]] || return 0
+
+  while [[ -L "$p" && $i -lt $max_depth ]]; do
+    local target
+    target="$(readlink "$p" 2>/dev/null)" || return 0
+    if [[ "$target" = /* ]]; then
+      p="$target"
+    else
+      p="$(cd "$(dirname "$p")" 2>/dev/null && pwd -P)/$target" || return 0
+    fi
+    i=$((i + 1))
+  done
+
+  if [[ -e "$p" ]]; then
+    (cd "$(dirname "$p")" 2>/dev/null && printf '%s/%s\n' "$(pwd -P)" "$(basename "$p")") || return 0
+  fi
+
+  return 0
+}
+
+# ----------------------------
+# Script shim inspection
+# ----------------------------
+
+# Purpose: Detect script shims that reference an app bundle.
+# Contract:
+#   fs_script_shim_app_bundle_ref <file> [max_bytes] [prefix_bytes]
+# Output:
+#   Prints resolved .app path if detected, otherwise empty.
+# Safety:
+#   Read-only. Best-effort. Fail-closed.
+fs_script_shim_app_bundle_ref() {
+  local f="$1"
+  local max_bytes="${2:-65536}"
+  local prefix_bytes="${3:-4096}"
+
+  [[ -f "$f" ]] || return 0
+
+  local size
+  size="$(wc -c <"$f" 2>/dev/null)" || return 0
+  [[ "$size" -le "$max_bytes" ]] || return 0
+
+  # Shebang-only scripts
+  local first
+  first="$(head -n 1 "$f" 2>/dev/null)" || return 0
+  [[ "$first" == '#!'* ]] || return 0
+
+  local chunk
+  chunk="$(head -c "$prefix_bytes" "$f" 2>/dev/null)" || return 0
+
+  local app
+  app="$(printf '%s' "$chunk" \
+    | LC_ALL=C grep -Eo '/(System/Applications|Applications|Users/[^/]+/Applications)/[^[:space:]]+\.app' 2>/dev/null \
+    | head -n 1)" || true
+
+  [[ -n "$app" ]] || return 0
+
+  if [[ "$app" == *.app/* ]]; then
+    app="${app%%.app/*}.app"
+  fi
+
+  printf '%s\n' "$app"
+}
+
 # End of library

@@ -13,11 +13,20 @@ set -euo pipefail
 # ----------------------------
 
 run_bins_module() {
-  local mode="$1" apply="$2" backup_dir="$3"
+  local mode="${1:-scan}"
+  local apply="${2:-false}"
+  local backup_dir="${3:-}"
   local inventory_index_file="${4:-}"
+
+  # Reserved args for contract consistency.
+  : "${mode}" "${backup_dir}"
 
   # Inputs
   log "Bins: mode=${mode} apply=${apply} backup_dir=${backup_dir} inventory_index=${inventory_index_file:-<none>}"
+
+  # Export flagged identifiers list for run summary consumption (stable contract even when empty).
+  BINS_FLAGGED_IDS_LIST=""
+  BINS_FLAGGED_COUNT="0"
 
   # ----------------------------
   # Target Directory
@@ -31,29 +40,112 @@ run_bins_module() {
   # ----------------------------
   # Inventory (optional): build a key membership set to reduce false positives.
   local inv_keys_file=""
-  if [[ -n "$inventory_index_file" && -s "$inventory_index_file" ]]; then
-    inv_keys_file="$(mktemp -t mc-leaner_bins_invkeys.XXXXXX)"
-    # inventory index format: key<TAB>name<TAB>source<TAB>path
-    cut -f1 "$inventory_index_file" | LC_ALL=C sort -u > "$inv_keys_file" || true
-    trap 'rm -f "$inv_keys_file" 2>/dev/null || true' RETURN
-  fi
+  local -a _bins_tmpfiles
+  _bins_tmpfiles=()
 
-  # Fast key lookup via awk (avoids O(N) grep per binary when /usr/local/bin is large).
-  local inv_keys_map=""
-  if [[ -n "$inv_keys_file" && -s "$inv_keys_file" ]]; then
-    inv_keys_map="$inv_keys_file"
+  _bins_tmp_cleanup() {
+    local f
+    for f in "${_bins_tmpfiles[@]:-}"; do
+      [[ -n "$f" && -e "$f" ]] && rm -f "$f" 2>/dev/null || true
+    done
+  }
+
+  # Single RETURN trap per function (bash only keeps one handler per signal).
+  trap _bins_tmp_cleanup RETURN
+
+  if [[ -n "$inventory_index_file" && -s "$inventory_index_file" ]]; then
+    inv_keys_file="$(mktemp -t mc-leaner_bins_invkeys.XXXXXX 2>/dev/null || true)"
+    if [[ -n "$inv_keys_file" ]]; then
+      _bins_tmpfiles+=("$inv_keys_file")
+      # inventory index format: key<TAB>name<TAB>source<TAB>path
+      cut -f1 "$inventory_index_file" | LC_ALL=C sort -u > "$inv_keys_file" 2>/dev/null || true
+    fi
   fi
 
   # Returns 0 (true) when the inventory key exists.
+  # Implementation note: bash 3.2 has no associative arrays, so we do a fast exact-line check.
   inv_has_key() {
     local k="$1"
-    [[ -n "$inv_keys_map" && -s "$inv_keys_map" ]] || return 1
-    awk -v k="$k" 'BEGIN{found=0} $0==k{found=1; exit} END{exit(found?0:1)}' "$inv_keys_map" 2>/dev/null
+    [[ -n "${inv_keys_file:-}" && -s "${inv_keys_file:-}" ]] || return 1
+    LC_ALL=C grep -Fqx -- "$k" "$inv_keys_file" 2>/dev/null
   }
   # ----------------------------
+
+  # Resolve a symlink target to an absolute, physical path (best-effort).
+  # Contract:
+  #   _bins_resolve_symlink_target <symlink_path>
+  # Output:
+  #   prints resolved absolute path to stdout, or empty string if it cannot be resolved.
+  # Safety: read-only; does not modify filesystem.
+  _bins_resolve_symlink_target() {
+    local link_path="$1"
+    [[ -n "${link_path:-}" ]] || { printf '%s' ""; return 0; }
+
+    # Prefer shared fs helper when available.
+    if command -v fs_resolve_symlink_target_physical >/dev/null 2>&1; then
+      fs_resolve_symlink_target_physical "$link_path" 2>/dev/null || true
+      return 0
+    fi
+
+    # Fallback (local best-effort) if lib/fs.sh is not available in this runtime.
+    command -v readlink >/dev/null 2>&1 || { printf '%s' ""; return 0; }
+
+    local cur="$link_path"
+    local target=""
+    local dir=""
+    local i=0
+
+    # Limit resolution depth to avoid cycles.
+    while [[ $i -lt 40 ]]; do
+      [[ -L "$cur" ]] || break
+      target="$(readlink "$cur" 2>/dev/null || true)"
+      [[ -n "${target:-}" ]] || { printf '%s' ""; return 0; }
+
+      if [[ "$target" != /* ]]; then
+        dir="$(cd "$(dirname "$cur")" 2>/dev/null && pwd -P 2>/dev/null || true)"
+        [[ -n "${dir:-}" ]] || { printf '%s' ""; return 0; }
+        cur="$dir/$target"
+      else
+        cur="$target"
+      fi
+      i=$((i + 1))
+    done
+
+    if [[ -e "$cur" ]]; then
+      dir="$(cd "$(dirname "$cur")" 2>/dev/null && pwd -P 2>/dev/null || true)"
+      if [[ -n "${dir:-}" ]]; then
+        printf '%s' "$dir/$(basename "$cur" 2>/dev/null || printf '%s' "$cur")"
+        return 0
+      fi
+      printf '%s' "$cur"
+      return 0
+    fi
+
+    printf '%s' ""
+  }
+
+  # Best-effort: detect whether a file is a small shebang script that references a macOS .app bundle.
+  # Contract:
+  #   _bins_script_shim_app_bundle_ref <file>
+  # Output:
+  #   prints an absolute path to the referenced .app bundle (or empty string).
+  # Safety: read-only.
+  _bins_script_shim_app_bundle_ref() {
+    local p="$1"
+    [[ -n "${p:-}" ]] || { printf '%s' ""; return 0; }
+
+    # Prefer shared fs helper when available.
+    if command -v fs_script_shim_app_bundle_ref >/dev/null 2>&1; then
+      fs_script_shim_app_bundle_ref "$p" 2>/dev/null || true
+      return 0
+    fi
+
+    # Fallback: no detection if helper not present.
+    printf '%s' ""
+  }
+
   # Heuristic Scan
   # ----------------------------
-  local found=0
   local flagged_count=0
   local flagged_items=()
   local move_failures=()
@@ -70,49 +162,61 @@ run_bins_module() {
     # Purpose: avoid flagging valid shims as orphans when they point into an installed app bundle
     if [[ -L "$bin_path" ]]; then
       local resolved=""
+      resolved="$(_bins_resolve_symlink_target "$bin_path")"
 
-      # Prefer realpath-style resolution when available (handles relative symlinks cleanly)
-      if is_cmd python3; then
-        resolved="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$bin_path" 2>/dev/null || true)"
-      fi
-
-      # Fallback: basic readlink resolution (may be relative)
-      if [[ -z "$resolved" ]]; then
-        resolved="$(readlink "$bin_path" 2>/dev/null || echo "")"
-        if [[ -n "$resolved" && "$resolved" != /* ]]; then
-          resolved="$(cd "$(dirname "$bin_path")" 2>/dev/null && cd "$(dirname "$resolved")" 2>/dev/null && pwd)/$(basename "$resolved")"
-        fi
-      fi
-
+      # If the symlink resolves to an existing target, treat it as managed and skip.
       if [[ -n "$resolved" && -e "$resolved" ]]; then
         log "SKIP (symlink target exists): $bin_path -> $resolved"
         continue
       fi
     fi
 
-    # Skip small script shims that reference an installed app bundle
-    # Purpose: avoid flagging launcher scripts that are not managed by Homebrew
-    if [[ -f "$bin_path" ]]; then
-      local head1
-      head1="$(head -n 1 "$bin_path" 2>/dev/null || true)"
-      if [[ "$head1" == "#!"* ]]; then
-        # Only scan a small prefix to avoid reading large files.
-        local app_ref
-        app_ref="$(head -c 4096 "$bin_path" 2>/dev/null | grep -Eo '/Applications/[^\"\\n]+\.app' | head -n 1 || true)"
-        if [[ -n "$app_ref" && -d "$app_ref" ]]; then
+    # Skip script shims that reference an installed app bundle.
+    # Purpose: avoid flagging launcher scripts that are not managed by Homebrew.
+    # Safety: read-only; best-effort.
+    # Notes:
+    #   - If a shim references an existing .app bundle, treat it as managed.
+    #   - If a shim references a missing .app bundle, flag it (likely stale shim).
+    if [[ -f "$bin_path" && ! -L "$bin_path" ]]; then
+      local app_ref=""
+      app_ref="$(_bins_script_shim_app_bundle_ref "$bin_path")"
+
+      if [[ "${EXPLAIN:-false}" == "true" ]]; then
+        if [[ -n "${app_ref:-}" ]]; then
+          explain_log "Bins: script shim detected: bin=${bin_path} app_ref=${app_ref}"
+        else
+          explain_log "Bins: script shim scan: no app_ref detected: bin=${bin_path}"
+        fi
+      fi
+
+      if [[ -n "${app_ref:-}" ]]; then
+        if [[ -d "$app_ref" ]]; then
           log "SKIP (script shim references app): $bin_path -> $app_ref"
           continue
         fi
+
+        # Shim points at a missing app bundle: keep scanning logic but annotate.
+        explain_log "Bins: script shim missing app (classified orphan): bin=${bin_path} app_ref=${app_ref}"
+        log "ORPHAN? $bin_path (script shim references missing app: $app_ref)"
+        flagged_count=$((flagged_count + 1))
+        flagged_items+=("${bin_path}")
+
+        # SAFETY: move only in clean mode with --apply and per-item confirmation.
+        if [[ "$mode" == "clean" && "$apply" == "true" ]]; then
+          if ask_yes_no "Orphaned binary detected:\n$bin_path\n\nReason: script shim references missing app bundle:\n$app_ref\n\nMove to backup folder?"; then
+            local move_out=""
+            if ! move_out="$(safe_move "$bin_path" "$backup_dir" 2>&1)"; then
+              move_failures+=("$bin_path|$move_out")
+              log "Move failed: $bin_path"
+            else
+              log "Moved: $bin_path -> $move_out"
+            fi
+          fi
+        fi
+
+        continue
       fi
     fi
-    # Skip known managed CLI shims that are not installed via Homebrew
-    # Note: Keep this list minimal; prefer deterministic checks above.
-    case "$base" in
-      code)
-        log "SKIP (known shim): $bin_path"
-        continue
-        ;;
-    esac
 
     # Skip binaries that are known to be installed (best-effort inventory guard).
     # WARNING: inventory keys are not a full package receipt system.
@@ -121,7 +225,6 @@ run_bins_module() {
       continue
     fi
 
-    found=1
     log "ORPHAN? $bin_path"
     flagged_count=$((flagged_count + 1))
     flagged_items+=("${bin_path}")
@@ -140,8 +243,13 @@ run_bins_module() {
     fi
   done
 
-  if [[ "$found" -eq 0 ]]; then
+  if [[ "$flagged_count" -eq 0 ]]; then
+    # Keep exported values stable even when nothing is flagged.
+    BINS_FLAGGED_IDS_LIST=""
+    BINS_FLAGGED_COUNT="0"
+
     log "No orphaned /usr/local/bin items found (by heuristics)."
+    summary_add "bins" "flagged=0"
     return 0
   fi
 
@@ -167,14 +275,14 @@ run_bins_module() {
     done
   fi
 
+  # Export flagged identifiers list for run summary consumption.
+  BINS_FLAGGED_IDS_LIST="$({ printf '%s\n' "${flagged_items[@]:-}"; } 2>/dev/null || true)"
+  BINS_FLAGGED_COUNT="${flagged_count}"
+
   # ----------------------------
   # Summary
   # ----------------------------
-  if [[ "$found" -eq 1 ]]; then
-    summary_add "bins" "flagged=${flagged_count}"
-  else
-    summary_add "bins" "flagged=0"
-  fi
+  summary_add "bins" "flagged=${flagged_count}"
 }
 
 # End of module

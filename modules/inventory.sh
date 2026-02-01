@@ -798,3 +798,5 @@ run_inventory_module() {
     summary_set "inventory" "brew_bins_ready" "${INVENTORY_BREW_BINS_READY}"
   fi
 }
+
+# End of module

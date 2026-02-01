@@ -650,7 +650,7 @@ esac
 # v2.3.0: cross-module correlation insights (scan-only outputs; logging only)
 _emit_disk_service_insights
 
-summary_add "timing: startup=${STARTUP_DUR_S:-0}s launchd=${LAUNCHD_DUR_S:-0}s caches=${CACHES_DUR_S:-0}s logs=${LOGS_DUR_S:-0}s disk=${DISK_DUR_S:-0}s leftovers=${LEFTOVERS_DUR_S:-0}s total=$(_elapsed_s "$run_started_s")s"
+summary_add "timing: startup=${STARTUP_DUR_S:-0}s launchd=${LAUNCHD_DUR_S:-0}s bins=${BINS_DUR_S:-0}s brew=${BREW_DUR_S:-0}s caches=${CACHES_DUR_S:-0}s intel=${INTEL_DUR_S:-0}s inventory=${INVENTORY_DUR_S:-0}s logs=${LOGS_DUR_S:-0}s disk=${DISK_DUR_S:-0}s leftovers=${LEFTOVERS_DUR_S:-0}s permissions=${PERMISSIONS_DUR_S:-0}s total=$(_elapsed_s "$run_started_s")s"
 summary_print
 log "Done."
 

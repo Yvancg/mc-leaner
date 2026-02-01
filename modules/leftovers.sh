@@ -257,14 +257,34 @@ run_leftovers_module() {
   _leftovers_t0="$(/bin/date +%s 2>/dev/null || echo '')"
   LEFTOVERS_DUR_S=0
 
+  # Temp files created by this module (cleaned on RETURN).
+  local -a _leftovers_tmpfiles
+  _leftovers_tmpfiles=()
+
+  _leftovers_tmp_cleanup() {
+    local f
+    for f in "${_leftovers_tmpfiles[@]:-}"; do
+      [[ -n "$f" && -e "$f" ]] && rm -f "$f" 2>/dev/null || true
+    done
+  }
+
   _leftovers_finish_timing() {
     # SAFETY: must be safe under `set -u` and when invoked on early returns.
     _leftovers_t1="$(/bin/date +%s 2>/dev/null || echo '')"
-    if [[ -n "${_leftovers_t0:-}" && -n "${_leftovers_t1:-}" ]]; then
+    if [[ -n "${_leftovers_t0:-}" && -n "${_leftovers_t1:-}" && "${_leftovers_t0}" =~ ^[0-9]+$ && "${_leftovers_t1}" =~ ^[0-9]+$ ]]; then
       LEFTOVERS_DUR_S=$((_leftovers_t1 - _leftovers_t0))
+    else
+      LEFTOVERS_DUR_S=0
     fi
   }
-  trap _leftovers_finish_timing RETURN
+
+  # Single RETURN trap per function (bash only keeps one handler per signal).
+  # Safety: timing + tmp cleanup only; no behavior changes to scan/clean logic.
+  _leftovers_on_return() {
+    _leftovers_finish_timing
+    _leftovers_tmp_cleanup
+  }
+  trap _leftovers_on_return RETURN
 
   log "Leftovers: scanning user-level support locations (inspection-first)..."
   if [[ "$explain" == "true" ]]; then
@@ -296,6 +316,7 @@ run_leftovers_module() {
   local inventory_index_tmp=""
   if [[ -z "${inventory_index_file}" || ! -f "${inventory_index_file}" ]]; then
     inventory_index_tmp="$(mktemp -t mcleaner_inventory_index.XXXXXX)"
+    [[ -n "$inventory_index_tmp" ]] && _leftovers_tmpfiles+=("$inventory_index_tmp")
 
     awk -F'\t' '
       ($1=="app"){
@@ -333,6 +354,7 @@ run_leftovers_module() {
   # We store only column 1 (key) as exact-match candidates.
   local installed_index_keys_file
   installed_index_keys_file="$(mktemp -t mcleaner_installed_index_keys.XXXXXX)"
+  [[ -n "$installed_index_keys_file" ]] && _leftovers_tmpfiles+=("$installed_index_keys_file")
 
   awk -F'\t' '{print $1}' "${inventory_index_file}" 2>/dev/null | sed '/^$/d' | sort -u > "${installed_index_keys_file}" || true
 
@@ -370,8 +392,6 @@ run_leftovers_module() {
 
   if [[ "$found_any" != "true" || "${LEFTOVERS_FLAGGED_COUNT}" -eq 0 ]]; then
     log "Leftovers: no large leftovers found (by heuristics)."
-    rm -f "${installed_index_keys_file:-}" 2>/dev/null || true
-    rm -f "${inventory_index_tmp:-}" 2>/dev/null || true
     _leftovers_summary_emit
     return 0
   fi
@@ -393,13 +413,10 @@ run_leftovers_module() {
   fi
 
   log "Leftovers: run with --apply to relocate selected leftovers (user-confirmed, reversible)."
-  rm -f "${installed_index_keys_file:-}" 2>/dev/null || true
-  rm -f "${inventory_index_tmp:-}" 2>/dev/null || true
 
   # Normalize export (strip trailing newline if present).
   LEFTOVERS_FLAGGED_IDS_LIST="$(printf '%s' "${LEFTOVERS_FLAGGED_IDS_LIST}" | sed '$s/\n$//')"
 
-  _leftovers_finish_timing
   _leftovers_summary_emit
 }
 

@@ -40,32 +40,62 @@ run_caches_module() {
   local inventory_index_file="${5:-}"
 
   # Inputs
-  # Sanitize inventory_index_file before logging to avoid multi-line noise.
+  # Never leak raw temp paths in logs. Only show a basename (or a stable pattern) when --explain is enabled.
+  local inventory_index_display="<none>"
   if [[ -n "${inventory_index_file:-}" ]]; then
-    local _inv_sane=""
-    _inv_sane="$(
-      { printf '%s\n' "${inventory_index_file}"; } 2>/dev/null \
-        | grep -Eo '(/(var/folders|tmp)/[^[:space:]]*mc-leaner_inventory\.[^[:space:]]+)' \
-        | tail -n 1
-    )" || true
-    if [[ -n "${_inv_sane:-}" ]]; then
-      inventory_index_file="${_inv_sane}"
+    if [[ "${explain}" == "true" ]]; then
+      local _inv_base=""
+      _inv_base="$(basename "${inventory_index_file}" 2>/dev/null || printf '%s' '')"
+      if [[ -n "${_inv_base:-}" ]]; then
+        inventory_index_display=".../${_inv_base}"
+      else
+        inventory_index_display=".../mc-leaner_inventory.*"
+      fi
+    else
+      inventory_index_display="redacted"
     fi
   fi
+  # Use the sanitized path internally from here on.
 
-  log "Caches: mode=${mode} apply=${apply} backup_dir=${backup_dir} explain=${explain} inventory_index=${inventory_index_file:-<none>}"
+  log "Caches: mode=${mode} apply=${apply} backup_dir=${backup_dir} explain=${explain} inventory_index=${inventory_index_display}"
 
   # Reserved args for contract consistency (modules share a stable CLI signature).
-  : "${mode}" "${backup_dir}" "${inventory_index_file}"
+  : "${mode}" "${backup_dir}" "${explain}" "${inventory_index_file}"
 
-  # Explain flag used throughout via EXPLAIN.
-  local _caches_prev_explain="${EXPLAIN:-false}"
-  EXPLAIN="${explain}"
+  # Explain gating for this module (do not mutate global EXPLAIN).
+  _caches_explain() {
+    [[ "${explain}" == "true" ]] || return 0
+    explain_log "$@"
+  }
+
+  _caches_display_path() {
+    # Purpose: avoid leaking full paths in non-explain output.
+    # - explain=true  -> full path
+    # - explain=false -> basename only
+    local p="${1:-}"
+    [[ -n "${p}" ]] || { printf '%s' ""; return 0; }
+
+    if [[ "${explain}" == "true" ]]; then
+      printf '%s' "${p}"
+      return 0
+    fi
+
+    local b=""
+    b="$(basename "${p}" 2>/dev/null || printf '%s' '')"
+    if [[ -n "${b}" ]]; then
+      printf '%s' "${b}"
+    else
+      printf '%s' "redacted"
+    fi
+  }
 
   # Timing (best-effort wall clock duration for this module).
   local _caches_t0="" _caches_t1=""
   _caches_t0="$(/bin/date +%s 2>/dev/null || echo '')"
   CACHES_DUR_S=0
+
+  local -a _caches_tmpfiles
+  _caches_tmpfiles=()
 
   _caches_finish_timing() {
     # SAFETY: must be safe under `set -u` and when invoked on early returns.
@@ -80,9 +110,17 @@ run_caches_module() {
     fi
   }
 
+  _caches_tmp_cleanup() {
+    local f
+    for f in "${_caches_tmpfiles[@]:-}"; do
+      [[ -n "${f}" && -e "${f}" ]] && rm -f "${f}" 2>/dev/null || true
+      [[ -n "${f}" && -e "${f}.sorted" ]] && rm -f "${f}.sorted" 2>/dev/null || true
+    done
+  }
+
   _caches_on_return() {
-    EXPLAIN="${_caches_prev_explain:-false}"
     _caches_finish_timing
+    _caches_tmp_cleanup
   }
   trap _caches_on_return RETURN
 
@@ -152,11 +190,20 @@ run_caches_module() {
 
   log "Caches: scanning user-level cache locations (min ${min_mb}MB)..."
 
-  if [[ "${EXPLAIN:-false}" == "true" ]]; then
+  # Stable exported summary fields (must be set even on early returns).
+  CACHES_FLAGGED_COUNT="0"
+  CACHES_TOTAL_MB="0"
+  CACHES_MOVED_COUNT="0"
+  CACHES_FAILURES_COUNT="0"
+  CACHES_SCANNED_DIRS="0"
+  CACHES_THRESHOLD_MB="${min_mb}"
+  CACHES_FLAGGED_IDS_LIST=""
+
+  if [[ "${explain}" == "true" ]]; then
     if _inventory_ready; then
-      explain_log "Caches (explain): inventory index available; owner labels will prefer inventory lookups"
+      _caches_explain "Caches (explain): inventory index available; owner labels will prefer inventory lookups"
     else
-      explain_log "Caches (explain): inventory index not available; owner labels will use folder naming/Spotlight heuristics"
+      _caches_explain "Caches (explain): inventory index not available; owner labels will use folder naming/Spotlight heuristics"
     fi
   fi
 
@@ -181,10 +228,11 @@ run_caches_module() {
     # Index format (expected): key<TAB>name<TAB>source<TAB>path
     # Defensive: tolerate variable field counts.
     local key="$1"
-    local idx_file="${inventory_index_file:-${INVENTORY_INDEX_FILE:-}}"
+    local idx_file=""
     local out
 
     _inventory_ready || return 1
+    idx_file="${inventory_index_file:-${INVENTORY_INDEX_FILE:-}}"
 
     # Safe exact-key match (case-insensitive) without regex pitfalls.
     # Prints: "Name (src)|path" when available, else best-effort.
@@ -353,32 +401,17 @@ run_caches_module() {
   local home="$HOME"
 
   local scanned_dirs=0
+  CACHES_SCANNED_DIRS="0"
   local over_threshold=0
   local below_report_file
   below_report_file="$(_caches_tmpfile 2>/dev/null | tail -n 1)"
+  _caches_tmpfiles+=("${below_report_file}")
 
   # Collect candidates as "kb<TAB>path" so we can de-dup safely later.
   local candidate_list_file
   candidate_list_file="$(_caches_tmpfile 2>/dev/null | tail -n 1)"
+  _caches_tmpfiles+=("${candidate_list_file}")
 
-  # Best-effort cleanup of temp files created by this module.
-  _caches_cleanup_tmp() {
-    # SAFETY: this EXIT trap can run after `run_caches_module` returns.
-    # Use locals so we do not re-expand variables multiple times under `set -u`.
-    local _bf="${below_report_file:-}"
-    local _cf="${candidate_list_file:-}"
-    local _ckp="${candidates_kb_path:-}"
-    local _rf="${report_file:-}"
-
-    rm -f \
-      "${_bf}" \
-      "${_cf}" \
-      "${_ckp}" \
-      "${_rf}" \
-      "${_rf}.sorted" \
-      2>/dev/null || true
-  }
-  trap _caches_cleanup_tmp EXIT
 
   # ----------------------------
   # Batch Size Scan
@@ -386,7 +419,7 @@ run_caches_module() {
 
   # Target 1: ~/Library/Caches (one level children)
   if [[ -d "$home/Library/Caches" ]]; then
-    explain_log "Caches (explain): sizing ~/Library/Caches (one level)"
+    _caches_explain "Caches (explain): sizing ~/Library/Caches (one level)"
 
     # Avoid glob expansion (can hit arg limits on large systems).
     # du output: <kb>\t<path>
@@ -416,7 +449,7 @@ run_caches_module() {
 
   # Target 2: ~/Library/Containers/*/Data/Library/Caches (batched)
   if [[ -d "$home/Library/Containers" ]]; then
-    explain_log "Caches (explain): finding container cache dirs"
+    _caches_explain "Caches (explain): finding container cache dirs"
 
     while IFS=$'\t' read -r kb d; do
       [[ -n "${kb:-}" && -n "${d:-}" ]] || continue
@@ -442,11 +475,12 @@ run_caches_module() {
     )
   fi
 
-  explain_log "Caches (explain): sizing complete"
+  _caches_explain "Caches (explain): sizing complete"
 
   # De-dup candidate paths (same cache dir may be discovered via multiple roots).
   local candidates_kb_path
   candidates_kb_path="$(_caches_tmpfile 2>/dev/null | tail -n 1)"
+  _caches_tmpfiles+=("${candidates_kb_path}")
 
   if [[ -s "$candidate_list_file" ]]; then
     # Sort by path (2nd field) then keep first occurrence per path.
@@ -462,17 +496,19 @@ run_caches_module() {
 
   # Update the log line to reflect unique candidates.
   log "Caches: scanned ${scanned_dirs} directories; found ${over_threshold} >= ${min_mb}MB."
+  CACHES_SCANNED_DIRS="${scanned_dirs}"
 
   if [[ ! -s "${candidates_kb_path:-}" ]]; then
     log "Caches: no directories >= ${min_mb}MB found (by heuristics)."
 
-    if [[ "${EXPLAIN:-false}" == "true" ]]; then
+    if [[ "${explain}" == "true" ]]; then
       log "Caches (explain): top 10 below threshold:"
       sort -t'|' -k1,1nr "$below_report_file" 2>/dev/null | head -n 10 | while IFS='|' read -r mb path; do
         log "  - ${mb}MB | ${path}"
       done
     fi
 
+    summary_add "caches" "flagged=0 total_mb=0 moved=0 failures=0 scanned=${scanned_dirs} threshold_mb=${min_mb}"
     return 0
   fi
 
@@ -485,6 +521,7 @@ run_caches_module() {
   local flagged_ids=()
   local move_failures=()
   report_file="$(_caches_tmpfile 2>/dev/null | tail -n 1)"
+  _caches_tmpfiles+=("${report_file}")
   local moved_count=0
 
   while IFS=$'\t' read -r kb d; do
@@ -514,6 +551,8 @@ run_caches_module() {
   local overall_total_mb=0
 
   while IFS='|' read -r owner mb mod path; do
+    local path_display
+    path_display="$(_caches_display_path "${path}")"
     if [[ "$owner" != "$current_owner" ]]; then
       # Flush previous owner total
       if [[ -n "$current_owner" ]]; then
@@ -527,28 +566,28 @@ run_caches_module() {
     owner_total_mb=$((owner_total_mb + mb))
     overall_total_mb=$((overall_total_mb + mb))
 
-    log "CACHE? ${mb}MB | modified: ${mod} | owner: ${owner} | path: ${path}"
+    log "CACHE? ${mb}MB | modified: ${mod} | owner: ${owner} | path: ${path_display}"
     flagged_count=$((flagged_count + 1))
-    flagged_items+=("${mb}MB | modified: ${mod} | owner: ${owner} | path: ${path}")
+    flagged_items+=("${mb}MB | modified: ${mod} | owner: ${owner} | path: ${path_display}")
     flagged_ids+=("${path}")
 
     # Explain-only: show top subfolders by size (up to 3)
-    if [[ "${EXPLAIN:-false}" == "true" ]]; then
-      explain_log "  Subfolders (top 3 by size):"
+    if [[ "${explain}" == "true" ]]; then
+      _caches_explain "  Subfolders (top 3 by size):"
       find "${path}" -mindepth 1 -maxdepth 1 -exec du -sk {} + 2>/dev/null \
         | sort -nr \
         | head -n 3 \
         | while read -r skb sub; do
             [[ "${skb:-}" =~ ^[0-9]+$ ]] || continue
             local smb=$((skb / 1024))
-            explain_log "    - ${smb}MB | ${sub}"
+            _caches_explain "    - ${smb}MB | ${sub}"
           done
     fi
 
     # SAFETY: user-level cleanup only, explicit clean mode + --apply + confirmation
     if [[ "$mode" == "clean" && "$apply" == "true" ]]; then
       if [[ "$path" != "$HOME/"* ]]; then
-        explain_log "SKIP (safety): refuses to move non-user path: $path"
+        _caches_explain "SKIP (safety): refuses to move non-user path: $path"
         continue
       fi
 
@@ -556,12 +595,20 @@ run_caches_module() {
         local move_out
         if move_out="$(safe_move "$path" "$backup_dir" 2>&1)"; then
           # Contract: log both source and resolved destination for legibility.
-          log "Moved: $path -> $move_out"
+          if [[ "${explain}" == "true" ]]; then
+            log "Moved: $path -> $move_out"
+          else
+            log "Moved: $(_caches_display_path "${path}") -> $(_caches_display_path "${move_out}")"
+          fi
           moved_count=$((moved_count + 1))
         else
           # Contract: keep the item flagged, but surface a clear move failure summary at end-of-run.
-          move_failures+=("$path | failed: $move_out")
-          log "Caches: move failed: $path"
+          move_failures+=("$(_caches_display_path "${path}") | failed: $(_caches_display_path "${move_out}")")
+          if [[ "${explain}" == "true" ]]; then
+            log "Caches: move failed: $path"
+          else
+            log "Caches: move failed: $(_caches_display_path "${path}")"
+          fi
         fi
       fi
     fi
@@ -589,8 +636,8 @@ run_caches_module() {
 
   log "Caches: run with --apply to relocate selected caches (user-confirmed, reversible)"
 
-  if [[ "${EXPLAIN:-false}" == "true" ]]; then
-    explain_log "Caches (explain): flagged items are listed above for review."
+  if [[ "${explain}" == "true" ]]; then
+    _caches_explain "Caches (explain): flagged items are listed above for review."
   fi
 
   # ----------------------------
@@ -608,10 +655,7 @@ run_caches_module() {
   # Export flagged identifiers list (paths) for run summary consumption.
   CACHES_FLAGGED_IDS_LIST="$({ printf '%s\n' "${flagged_ids[@]}"; } 2>/dev/null || true)"
 
-  # Ensure timing is computed before returning from the module.
-  _caches_on_return
-
-  summary_add "Caches flagged=${flagged_count} total_mb=${overall_total_mb} moved=${moved_count} failures=${#move_failures[@]} scanned=${scanned_dirs} (threshold=${min_mb}MB)"
+  summary_add "caches" "flagged=${flagged_count} total_mb=${overall_total_mb} moved=${moved_count} failures=${#move_failures[@]} scanned=${scanned_dirs} threshold_mb=${min_mb}"
 }
 
 # End of module

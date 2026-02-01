@@ -68,7 +68,6 @@ source "$ROOT_DIR/modules/disk.sh"
 inventory_ready="false"
 inventory_file=""
 inventory_index_file=""
-inv_keys_file=""
 
 # Defensive: some helpers may use a scratch variable named `tmp`.
 # Under `set -u`, reference to an unset variable is fatal, so initialize it.
@@ -76,48 +75,29 @@ inv_keys_file=""
 tmp=""
 
 known_apps_file=""            # legacy: mixed list used by launchd heuristics
-brew_formulae_file=""         # legacy: list of brew formulae/casks used by /usr/local/bin heuristics
 brew_bins_file=""             # preferred: brew executable basenames list (from inventory when available)
 installed_bundle_ids_file=""  # legacy: bundle id list used by leftovers module
 
 ensure_inventory() {
   # Purpose: Build inventory once per invocation.
   # Contract: inventory.sh should export INVENTORY_READY/INVENTORY_FILE/INVENTORY_INDEX_FILE.
+  # Usage: ensure_inventory [inventory_mode]
+  #   - scan (default): apps + Homebrew
+  #   - brew-only: Homebrew-only inventory (skip app scans)
+  local inv_mode="${1:-scan}"
+
   if [[ "$inventory_ready" == "true" ]]; then
     return 0
   fi
 
   # Best-effort; if inventory cannot be built, we keep going and let modules fall back.
-  run_inventory_module "scan" "false" "$BACKUP_DIR" "$EXPLAIN" || true
+  run_inventory_module "${inv_mode}" "false" "$BACKUP_DIR" "$EXPLAIN" || true
 
   inventory_ready="${INVENTORY_READY:-false}"
   inventory_file="${INVENTORY_FILE:-}"
   inventory_index_file="${INVENTORY_INDEX_FILE:-}"
-  inv_keys_file="${INVENTORY_INDEX_KEYS_FILE:-}"
 }
 
-ensure_brew_formulae() {
-  # Purpose: Build a newline list of Homebrew formulae+casks (legacy input for bins module)
-  if [[ -n "$brew_formulae_file" ]]; then
-    return 0
-  fi
-
-  ensure_inventory
-  brew_formulae_file="$(tmpfile)"
-  : > "${brew_formulae_file}"
-
-  if [[ "$inventory_ready" == "true" && -n "$inventory_file" && -f "$inventory_file" ]]; then
-    # inventory.tsv columns: type, source, name, bundle_id, path
-    awk -F'\t' '$1=="brew"{print $3}' "$inventory_file" | sort -u >> "$brew_formulae_file" 2>/dev/null || true
-  elif is_cmd brew; then
-    # Fallback: direct brew listing
-    log "Listing Homebrew formulae and casks..."
-    brew list --formula >> "$brew_formulae_file" 2>/dev/null || true
-    brew list --cask    >> "$brew_formulae_file" 2>/dev/null || true
-  else
-    log "Homebrew not found, skipping brew-based checks."
-  fi
-}
 
 ensure_brew_bins() {
   # Purpose: Build a newline list of Homebrew executable basenames.
@@ -157,17 +137,35 @@ ensure_known_apps() {
   fi
 
   ensure_inventory
-  ensure_brew_formulae
 
   known_apps_file="$(tmpfile)"
   : > "${known_apps_file}"
 
   if [[ "$inventory_ready" == "true" && -n "$inventory_file" && -f "$inventory_file" ]]; then
+    # Apps: keep the legacy behavior for launchd heuristics (paths work well).
     awk -F'\t' '$1=="app"{print $5}' "$inventory_file" >> "$known_apps_file" 2>/dev/null || true
-    cat "$brew_formulae_file" >> "$known_apps_file" 2>/dev/null || true
+
+    # Homebrew: prefer inventory-exported lists to avoid extra brew calls.
+    # Keys match inventory indexes: brew:formula:<name>, brew:cask:<name>.
+    if [[ -n "${INVENTORY_BREW_FORMULAE:-}" ]]; then
+      while IFS= read -r f; do
+        [[ -n "${f}" ]] || continue
+        printf 'brew:formula:%s\n' "${f}" >> "$known_apps_file" 2>/dev/null || true
+      done <<< "$(printf '%s\n' "${INVENTORY_BREW_FORMULAE}" | awk 'NF' 2>/dev/null || true)"
+    fi
+
+    if [[ -n "${INVENTORY_BREW_CASKS:-}" ]]; then
+      while IFS= read -r c; do
+        [[ -n "${c}" ]] || continue
+        printf 'brew:cask:%s\n' "${c}" >> "$known_apps_file" 2>/dev/null || true
+      done <<< "$(printf '%s\n' "${INVENTORY_BREW_CASKS}" | awk 'NF' 2>/dev/null || true)"
+    fi
   else
-    # Minimal fallback: keep behavior predictable even if inventory failed
-    cat "$brew_formulae_file" >> "$known_apps_file" 2>/dev/null || true
+    # Fallback: inventory not available; best-effort brew queries.
+    if is_cmd brew; then
+      brew list --formula 2>/dev/null | awk 'NF{print "brew:formula:"$0}' >> "$known_apps_file" 2>/dev/null || true
+      brew list --cask    2>/dev/null | awk 'NF{print "brew:cask:"$0}'    >> "$known_apps_file" 2>/dev/null || true
+    fi
   fi
 
   sort -u "$known_apps_file" -o "$known_apps_file" 2>/dev/null || true
@@ -403,10 +401,11 @@ run_started_s="$(_now_epoch_s)"
 # Contract: these helpers must not change behavior; they only parameterize existing calls.
 
 _run_brew_phase() {
-  # Usage: _run_brew_phase
+  # Usage: _run_brew_phase [inventory_mode]
   # NOTE: brew module is inspection-first; keep behavior stable and explicit.
+  local inv_mode="${1:-scan}"
 
-  ensure_inventory
+  ensure_inventory "${inv_mode}"
 
   # Contract: run_brew_module <mode> <apply> <backup_dir> <explain> [inventory_index_file]
   run_brew_module "brew-only" "false" "$BACKUP_DIR" "$EXPLAIN" "${inventory_index_file:-}"
@@ -632,7 +631,7 @@ case "$MODE" in
     _run_permissions_phase "$APPLY"
     ;;
   brew-only)
-    _run_brew_phase
+    _run_brew_phase "brew-only"
     ;;
   startup-only)
     _run_startup_phase
@@ -640,6 +639,12 @@ case "$MODE" in
   disk-only)
     _run_disk_phase
     ;;
+
+  inventory-only)
+    ensure_inventory "scan"
+    summary_add "inventory: inspected (ready=${INVENTORY_READY:-false})"
+    ;;
+
   *)
     log_error "Unknown mode: $MODE"
     usage >&2

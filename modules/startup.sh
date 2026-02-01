@@ -5,7 +5,8 @@
 # Safety: Inspection-only (never modifies system state). In clean/apply mode, it still only scans.
 # NOTE: Modules run with strict mode for deterministic failures and auditability.
 
-set -euo pipefail
+# Strict mode: avoid `set -e` in inspection modules (best-effort scanning).
+set -uo pipefail
 
 # Suppress SIGPIPE noise when output is piped to a consumer that exits early (e.g., `head -n`).
 # Safety: logging/output ergonomics only; does not affect inspection results.
@@ -81,6 +82,16 @@ _startup_explain() {
   else
     log "EXPLAIN: $*"
   fi
+}
+
+# ----------------------------
+# System domain detection helper
+# ----------------------------
+_startup_is_system_domain_plist() {
+  # System domain: Apple-managed launchd surfaces under /System/Library.
+  # Safety: read-only classification.
+  local plist="$1"
+  [[ "${plist}" == /System/Library/LaunchDaemons/* || "${plist}" == /System/Library/LaunchAgents/* ]]
 }
 
 # ----------------------------
@@ -226,7 +237,7 @@ _startup_plist_exec() {
   # Next fallback: targeted XML extraction for ProgramArguments (avoid full-plist conversion when possible).
   # Behavior: best-effort only; preserves existing precedence and outputs.
   local pa_xml=""
-  pa_xml="$(_startup_plist_extract_xml \"${plist}\" ProgramArguments)"
+  pa_xml="$(_startup_plist_extract_xml "${plist}" ProgramArguments)"
   if [[ -n "${pa_xml}" ]]; then
     argv0="$({ printf '%s' "${pa_xml}"; } 2>/dev/null | sed -n 's/.*<string>\([^<]*\)<\/string>.*/\1/p; q' 2>/dev/null || true)"
     argv0="$(printf '%s' "${argv0}" | sed 's/^\s*//;s/\s*$//')"
@@ -460,8 +471,8 @@ _startup_emit_item() {
 # Collectors
 # ----------------------------
 _startup_scan_launchd_dir() {
-  # Inputs: explain dir source
-  local explain="$1" dir="$2" source="$3"
+  # Inputs: explain explain_system dir source
+  local explain="$1" explain_system="$2" dir="$3" source="$4"
   [[ -d "${dir}" ]] || return 0
 
   local plist="" label="" exec_path="" timing="" owner_meta="" owner="" how="" conf="" scope=""
@@ -480,6 +491,39 @@ _startup_scan_launchd_dir() {
   esac
 
   while IFS= read -r -d '' plist; do
+    local is_system_domain="false"
+    if _startup_is_system_domain_plist "${plist}"; then
+      is_system_domain="true"
+    fi
+
+    if [[ "${is_system_domain}" == "true" ]]; then
+      # Shallow system-domain path:
+      # - avoid expensive plist parsing and exec resolution
+      # - never flag
+      # - only emit per-item output when explicitly requested
+      label="$(basename "${plist}" | sed 's/\.plist$//')"
+      exec_path="-"
+      if [[ "${plist}" == /System/Library/LaunchDaemons/* ]]; then
+        timing="boot"
+      else
+        timing="login"
+      fi
+      owner="Apple (system)"
+      how="system-domain"
+      conf="high"
+      local impact="low"
+
+      if [[ "${explain_system}" == "true" ]]; then
+        _startup_emit_item "${explain}" "${timing}" "${source}" "${label}" "${exec_path}" "${owner}" "${how}" "${conf}" "${impact}"
+      fi
+
+      # Emit SERVICE? record even when per-item output is suppressed.
+      service_emit_record "${scope}" "${timing}" "${owner}" "" "${label}"
+      STARTUP_CHECKED=$((STARTUP_CHECKED + 1))
+      continue
+    fi
+
+    # Non-system domain: full extraction and attribution.
     label="$(_startup_plist_label "${plist}")"
     exec_path="$(_startup_plist_exec "${plist}")"
     timing="$(_startup_infer_timing_from_plist "${plist}")"
@@ -614,13 +658,29 @@ run_startup_module() {
   local inventory_index="${5:-}"
 
   # Inputs
-  log "Startup: mode=${mode} apply=${apply} backup_dir=${backup_dir} explain=${explain} inventory_index=${inventory_index:-<none>}"
+  local inventory_label="<none>"
+  if [[ -n "${inventory_index}" ]]; then
+    if [[ "${explain}" == "true" ]]; then
+      inventory_label=".../$(basename "${inventory_index}")"
+    else
+      inventory_label="redacted"
+    fi
+  fi
+
+  log "Startup: mode=${mode} apply=${apply} backup_dir=${backup_dir} explain=${explain} inventory_index=${inventory_label}"
 
   # Explain flag used throughout via EXPLAIN.
   local _startup_prev_explain="${EXPLAIN:-false}"
   EXPLAIN="${explain}"
 
-  : "${mode}" "${backup_dir}" "${inventory_index}" # reserved for contract consistency
+  # Optional: emit per-item system-domain startup records only when explicitly enabled.
+  # This is intentionally an environment-controlled toggle so older runners remain compatible.
+  local explain_system="${STARTUP_EXPLAIN_SYSTEM:-false}"
+  if [[ "${explain}" != "true" ]]; then
+    explain_system="false"
+  fi
+
+  : "${mode}" "${backup_dir}" # reserved for contract consistency
 
   # Inventory index (if provided by runner) for attribution helpers.
   local _startup_prev_inventory_index_file="${INVENTORY_INDEX_FILE:-}"
@@ -686,11 +746,11 @@ run_startup_module() {
 
   _startup_explain "${explain}" "Startup: scanning launchd + login items"
 
-  _startup_scan_launchd_dir "${explain}" "${HOME}/Library/LaunchAgents" "LaunchAgent"
-  _startup_scan_launchd_dir "${explain}" "/Library/LaunchAgents" "LaunchAgent"
+  _startup_scan_launchd_dir "${explain}" "${explain_system}" "${HOME}/Library/LaunchAgents" "LaunchAgent"
+  _startup_scan_launchd_dir "${explain}" "${explain_system}" "/Library/LaunchAgents" "LaunchAgent"
 
-  _startup_scan_launchd_dir "${explain}" "/Library/LaunchDaemons" "LaunchDaemon"
-  _startup_scan_launchd_dir "${explain}" "/System/Library/LaunchDaemons" "LaunchDaemon"
+  _startup_scan_launchd_dir "${explain}" "${explain_system}" "/Library/LaunchDaemons" "LaunchDaemon"
+  _startup_scan_launchd_dir "${explain}" "${explain_system}" "/System/Library/LaunchDaemons" "LaunchDaemon"
 
   _startup_scan_login_items "${explain}"
 

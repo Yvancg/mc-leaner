@@ -49,7 +49,15 @@ run_launchd_module() {
   local inventory_index_file="${4:-}"
 
   # Inputs
-  log "Launchd: mode=${mode} apply=${apply} backup_dir=${backup_dir} inventory_index=${inventory_index_file:-<none>}"
+  local inv_disp="<none>"
+  if [[ -n "${inventory_index_file:-}" ]]; then
+    if [[ "${EXPLAIN:-false}" == "true" ]]; then
+      inv_disp="${inventory_index_file}"
+    else
+      inv_disp="redacted"
+    fi
+  fi
+  log "Launchd: mode=${mode} apply=${apply} backup_dir=${backup_dir} inventory_index=${inv_disp}"
 
   # Timing (best-effort wall clock duration for this module).
   local _launchd_t0="" _launchd_t1=""

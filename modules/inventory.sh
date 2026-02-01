@@ -24,7 +24,7 @@
 #
 # Notes:
 #   - App discovery uses `find -L` to capture symlinked Apple apps (Cryptex).
-#   - Bundle id resolution is best-effort (mdls, then Info.plist).
+#   - Bundle id resolution is best-effort (Info.plist, then mdls).
 
 # NOTE: This module uses best-effort probing across app roots and optional Homebrew.
 # It enables `set -u` and `pipefail` but avoids `set -e` to prevent aborting on expected absence/permission errors.
@@ -40,9 +40,18 @@ trap '' PIPE
 # Exported Globals
 # ----------------------------
 # These are exported for other modules.
+
 INVENTORY_FILE=""
 INVENTORY_INDEX_FILE=""
 INVENTORY_READY="false"
+
+# Optional: module duration in seconds (best-effort; used for run summaries).
+INVENTORY_DUR_S="0"
+
+# Optional: Homebrew lists for downstream modules (newline-delimited strings).
+# These help modules avoid extra `brew list` calls when inventory already scanned brew.
+INVENTORY_BREW_FORMULAE=""
+INVENTORY_BREW_CASKS=""
 
 # Optional derived index: list of Homebrew-provided executable basenames (from prefix/bin + prefix/sbin).
 INVENTORY_BREW_BINS_FILE=""
@@ -76,6 +85,29 @@ _inventory_debug() {
   fi
 }
 
+_inventory_redact_tmp_path() {
+  # Purpose: Avoid printing raw temp paths in logs.
+  # Behavior:
+  #   - When EXPLAIN=true: return a redacted form using only the basename, prefixed with ".../".
+  #   - Otherwise: return the literal string "redacted".
+  # Safety: Logging-only helper.
+  local p="${1:-}"
+  [[ -n "${p}" ]] || { printf '%s' "redacted"; return 0; }
+
+  if [[ "${EXPLAIN:-false}" != "true" ]]; then
+    printf '%s' "redacted"
+    return 0
+  fi
+
+  local b
+  b="$(basename "${p}" 2>/dev/null || printf '%s' "")"
+  if [[ -n "${b}" ]]; then
+    printf '%s' ".../${b}"
+  else
+    printf '%s' ".../mc-leaner_inventory.*"
+  fi
+}
+
 #
 # ----------------------------
 # Temp Files
@@ -90,7 +122,6 @@ _inventory_tmpfile() {
   echo "$f"
 }
 
-#
 # ----------------------------
 # TSV Helpers
 # ----------------------------
@@ -103,7 +134,6 @@ _inventory_sanitize_tsv() {
   echo "$s"
 }
 
-#
 # ----------------------------
 # Lookup Cache
 # ----------------------------
@@ -120,33 +150,30 @@ _inventory_enable_cache_if_supported() {
   fi
 }
 
-#
 # ----------------------------
 # App Metadata
 # ----------------------------
 _inventory_bundle_id_for_app() {
   # Purpose: Return the bundle id for an app bundle (best-effort).
+  # Performance: Prefer a direct Info.plist read (cheap) and only fall back to mdls (heavier).
   local app_path="$1"
   local bid=""
 
-  # mdls is fast and non-invasive. It returns (null) if not present.
-  bid="$(mdls -name kMDItemCFBundleIdentifier -raw "$app_path" 2>/dev/null || true)"
-  if [[ "$bid" == "(null)" ]]; then
-    bid=""
+  local plist="${app_path}/Contents/Info.plist"
+  if [[ -f "${plist}" ]]; then
+    bid="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "${plist}" 2>/dev/null || true)"
   fi
 
-  if [[ -z "$bid" ]]; then
-    # Fallback: read Info.plist (PlistBuddy is more reliable than defaults for file paths)
-    local plist="$app_path/Contents/Info.plist"
-    if [[ -f "$plist" ]]; then
-      bid="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$plist" 2>/dev/null || true)"
+  if [[ -z "${bid}" ]]; then
+    bid="$(mdls -name kMDItemCFBundleIdentifier -raw "${app_path}" 2>/dev/null || true)"
+    if [[ "${bid}" == "(null)" ]]; then
+      bid=""
     fi
   fi
 
-  echo "$bid"
+  printf '%s' "${bid}"
 }
 
-#
 # ----------------------------
 # Index Writers
 # ----------------------------
@@ -196,8 +223,6 @@ _inventory_add_index() {
 
   printf '%s\t%s\t%s\t%s\n' "$key" "$name" "$source" "$app_path" >> "$INVENTORY_INDEX_FILE"
 }
-
-
 
 _inventory_normalize_app_key() {
   # Purpose: Normalize an app name into a conservative inventory key.
@@ -328,7 +353,6 @@ inventory_normalize_owner_name() {
   return 0
 }
 
-#
 # ----------------------------
 # App Scanning
 # ----------------------------
@@ -387,8 +411,18 @@ _inventory_scan_apps_root() {
     if [[ -n "$bid" ]]; then
       _inventory_add_index "$bid" "$name" "$effective_source" "$app"
     fi
-    _inventory_add_index "$(_inventory_normalize_app_key "$base")" "$name" "$effective_source" "$app"
-    _inventory_add_index "$(_inventory_normalize_app_key "$name")" "$name" "$effective_source" "$app"
+
+    # Normalized keys: avoid duplicate writes when base/name normalize identically
+    local k_base="" k_name=""
+    k_base="$(_inventory_normalize_app_key "$base")"
+    k_name="$(_inventory_normalize_app_key "$name")"
+
+    if [[ -n "$k_base" ]]; then
+      _inventory_add_index "$k_base" "$name" "$effective_source" "$app"
+    fi
+    if [[ -n "$k_name" && "$k_name" != "$k_base" ]]; then
+      _inventory_add_index "$k_name" "$name" "$effective_source" "$app"
+    fi
   done < <(
     # Use `find -L` so we catch Apple Cryptex-installed apps that appear as symlinks in /Applications
     # (e.g. /Applications/Safari.app -> /System/Cryptexes/App/System/Applications/Safari.app).
@@ -396,7 +430,6 @@ _inventory_scan_apps_root() {
   )
 }
 
-#
 # ----------------------------
 # Homebrew Scanning
 # ----------------------------
@@ -412,19 +445,38 @@ _inventory_scan_brew() {
 
   _inventory_debug "brew present; scanning formulae/casks"
 
+  # Capture lists once so downstream modules can reuse them.
+  # Store as newline-delimited strings (no temp files).
+  local formulae_list=""
+  local casks_list=""
+
+  formulae_list="$(brew list --formula 2>/dev/null || true)"
+  casks_list="$(brew list --cask 2>/dev/null || true)"
+
+  INVENTORY_BREW_FORMULAE="$(printf '%s\n' "$formulae_list" | awk 'NF' 2>/dev/null || true)"
+  INVENTORY_BREW_CASKS="$(printf '%s\n' "$casks_list" | awk 'NF' 2>/dev/null || true)"
+
+  if [[ "${EXPLAIN:-false}" == "true" ]]; then
+    local nf nc
+    nf="$(printf '%s\n' "${INVENTORY_BREW_FORMULAE}" | awk 'NF' | wc -l | tr -d ' ' 2>/dev/null || printf '0')"
+    nc="$(printf '%s\n' "${INVENTORY_BREW_CASKS}" | awk 'NF' | wc -l | tr -d ' ' 2>/dev/null || printf '0')"
+    _inventory_log "Inventory (explain): brew formulae list exported (lines=${nf})"
+    _inventory_log "Inventory (explain): brew casks list exported (lines=${nc})"
+  fi
+
   local f
   while IFS= read -r f; do
     [[ -z "$f" ]] && continue
     _inventory_add_row "brew_formula" "brew" "$f" "" "" "$f"
     _inventory_add_index "brew:formula:$f" "$f" "brew" ""
-  done < <(brew list --formula 2>/dev/null || true)
+  done <<< "$(printf '%s\n' "${INVENTORY_BREW_FORMULAE}" | awk 'NF')"
 
   local c
   while IFS= read -r c; do
     [[ -z "$c" ]] && continue
     _inventory_add_row "brew_cask" "brew" "$c" "" "" "$c"
     _inventory_add_index "brew:cask:$c" "$c" "brew" ""
-  done < <(brew list --cask 2>/dev/null || true)
+  done <<< "$(printf '%s\n' "${INVENTORY_BREW_CASKS}" | awk 'NF')"
 }
 _inventory_build_brew_bins() {
   # Build a fast membership list for other modules (e.g. /usr/local/bin heuristics).
@@ -445,7 +497,10 @@ _inventory_build_brew_bins() {
   fi
 
   local tmp=""
-  tmp="$(_inventory_tmpfile)"
+  tmp="$(mktemp -t mc-leaner_inventory_brew_bins.XXXXXX 2>/dev/null || true)"
+  if [[ -z "$tmp" ]]; then
+    tmp="$(mktemp 2>/dev/null || true)"
+  fi
   if [[ -z "$tmp" || ! -e "$tmp" ]]; then
     return 0
   fi
@@ -474,7 +529,10 @@ _inventory_build_brew_bins() {
 
   # Sort unique, locale-stable.
   local out=""
-  out="$(_inventory_tmpfile)"
+  out="$(mktemp -t mc-leaner_inventory_brew_bins.XXXXXX 2>/dev/null || true)"
+  if [[ -z "$out" ]]; then
+    out="$(mktemp 2>/dev/null || true)"
+  fi
   if [[ -z "$out" || ! -e "$out" ]]; then
     rm -f "$tmp" 2>/dev/null || true
     return 0
@@ -497,11 +555,10 @@ _inventory_build_brew_bins() {
   INVENTORY_BREW_BINS_FILE="$out"
   INVENTORY_BREW_BINS_READY="true"
 
-  _inventory_debug "brew bins: ready=true entries=$final_rows file=$INVENTORY_BREW_BINS_FILE"
+  _inventory_debug "brew bins: ready=true entries=${final_rows} file=$(_inventory_redact_tmp_path "${INVENTORY_BREW_BINS_FILE}")"
   return 0
 }
 
-#
 # ----------------------------
 # Index Maintenance
 # ----------------------------
@@ -509,7 +566,6 @@ _inventory_dedupe_index_file() {
   # Deduplicate INVENTORY_INDEX_FILE in-place.
   # Index lookups only need one hit per key, so keeping the first match is fine.
   # We keep the FIRST occurrence in original order (stable dedupe), and remove any later duplicates.
-  #
   # Format: key\tname\tsource\tapp_path
 
   local f="${INVENTORY_INDEX_FILE:-}"
@@ -541,13 +597,29 @@ _inventory_dedupe_index_file() {
   return 0
 }
 
-#
 # ----------------------------
 # Public API
 # ----------------------------
 inventory_build() {
   # Public: build inventory files and export globals.
   # Respects EXPLAIN for verbose logging.
+  #
+  # Usage:
+  #   inventory_build [mode]
+  # Modes:
+  #   - scan      (default): scan apps + Homebrew
+  #   - brew-only: scan Homebrew only (skip app roots)
+
+  local build_mode="${1:-scan}"
+  local brew_only="false"
+  case "${build_mode}" in
+    brew-only|brew_only|brew)
+      brew_only="true"
+      ;;
+    *)
+      brew_only="false"
+      ;;
+  esac
 
   INVENTORY_FILE="$(_inventory_tmpfile)"
   INVENTORY_INDEX_FILE="$(_inventory_tmpfile)"
@@ -564,26 +636,30 @@ inventory_build() {
     return 1
   fi
 
-  # Truncate
   : > "$INVENTORY_FILE"
   : > "$INVENTORY_INDEX_FILE"
 
-  # Enable lookup cache when supported.
   _inventory_enable_cache_if_supported
 
-  _inventory_log "Inventory: building installed software list (apps + Homebrew)..."
+  if [[ "${brew_only}" == "true" ]]; then
+    _inventory_log "Inventory: building installed software list (Homebrew only)..."
+    _inventory_debug "brew-only inventory: skipping app scans"
+  else
+    _inventory_log "Inventory: building installed software list (apps + Homebrew)..."
+  fi
 
-  # App roots
-  _inventory_scan_apps_root "/System/Applications" "system"
-  _inventory_scan_apps_root "/Applications" "user"
-  _inventory_scan_apps_root "$HOME/Applications" "user"
+  # App roots (skip in brew-only mode)
+  if [[ "${brew_only}" != "true" ]]; then
+    _inventory_scan_apps_root "/System/Applications" "system"
+    _inventory_scan_apps_root "/Applications" "user"
+    _inventory_scan_apps_root "$HOME/Applications" "user"
+  fi
 
   # Homebrew
   _inventory_scan_brew
   _inventory_build_brew_bins
   _inventory_dedupe_index_file
 
-  # Summaries
   local apps_system apps_user brew_formula brew_cask
   apps_system="$(awk -F'\t' '$1=="app" && $2=="system" {c++} END{print c+0}' "$INVENTORY_FILE" 2>/dev/null || echo 0)"
   apps_user="$(awk -F'\t' '$1=="app" && $2=="user" {c++} END{print c+0}' "$INVENTORY_FILE" 2>/dev/null || echo 0)"
@@ -594,10 +670,14 @@ inventory_build() {
   idx_lines="$(awk 'END{print NR+0}' "$INVENTORY_INDEX_FILE" 2>/dev/null || echo 0)"
 
   _inventory_log "Inventory: apps system=$apps_system user=$apps_user; brew formulae=$brew_formula casks=$brew_cask; index_lines=$idx_lines"
+  if [[ "${EXPLAIN:-false}" == "true" ]]; then
+    _inventory_log "Inventory (explain): index file=$(_inventory_redact_tmp_path "${INVENTORY_INDEX_FILE}")"
+  fi
 
   INVENTORY_READY="true"
-  export INVENTORY_FILE INVENTORY_INDEX_FILE INVENTORY_READY INVENTORY_CACHE_READY
+  export INVENTORY_FILE INVENTORY_INDEX_FILE INVENTORY_READY INVENTORY_CACHE_READY INVENTORY_DUR_S
   export INVENTORY_BREW_BINS_FILE INVENTORY_BREW_BINS_READY
+  export INVENTORY_BREW_FORMULAE INVENTORY_BREW_CASKS
   return 0
 }
 
@@ -787,7 +867,19 @@ run_inventory_module() {
   # Inventory is always inspection-only.
   _inventory_debug "mode=${mode} apply=${apply} backup=${backup_dir}"
 
-  inventory_build
+  # Timing: capture inventory module duration (seconds) for the top-level run summary.
+  # Use SECONDS (bash builtin) for low overhead and broad compatibility.
+  local start_s="${SECONDS}"
+
+  inventory_build "${mode}"
+
+  # Best-effort duration; avoid negative values if SECONDS is reset.
+  local dur_s=$((SECONDS - start_s))
+  if [[ "${dur_s}" -lt 0 ]]; then
+    dur_s="0"
+  fi
+  INVENTORY_DUR_S="${dur_s}"
+  export INVENTORY_DUR_S
 
   # Summary collector integration (best-effort)
   if command -v summary_set >/dev/null 2>&1; then
@@ -796,6 +888,7 @@ run_inventory_module() {
     summary_set "inventory" "ready" "$INVENTORY_READY"
     summary_set "inventory" "items" "$inv_items"
     summary_set "inventory" "brew_bins_ready" "${INVENTORY_BREW_BINS_READY}"
+    summary_set "inventory" "dur_s" "${INVENTORY_DUR_S}"
   fi
 }
 

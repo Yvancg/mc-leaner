@@ -25,13 +25,29 @@ BREW_CACHE_LINES=()        # human-readable cache summary lines
 BREW_FLAGGED_ITEMS=()      # actionable review items (end-of-run)
 
 # ----------------------------
+# Module-scoped state
+# ----------------------------
+BREW_EXPLAIN="false"
+BREW_TMPFILES=()
+
+# Stable exported summary fields (set in run_brew_module)
+BREW_FLAGGED_COUNT="0"
+BREW_FLAGGED_IDS_LIST=""
+BREW_DUR_S=0
+BREW_FORMULAE_COUNT="0"
+BREW_CASKS_COUNT="0"
+BREW_OUTDATED_UNPINNED_COUNT="0"
+BREW_OUTDATED_PINNED_COUNT="0"
+BREW_LEAVES_COUNT="0"
+
+# ----------------------------
 # Defensive Checks
 # ----------------------------
 if ! type explain_log >/dev/null 2>&1; then
   explain_log() {
     # Purpose: Best-effort verbose logging when --explain is enabled.
     # Safety: Logging only.
-    if [[ "${EXPLAIN:-false}" == "true" ]]; then
+    if [[ "${BREW_EXPLAIN:-false}" == "true" ]]; then
       log "$@"
     fi
   }
@@ -40,20 +56,19 @@ fi
 # ----------------------------
 # Helpers
 # ----------------------------
-if ! type tmpfile >/dev/null 2>&1; then
-  tmpfile() {
-    # Purpose: Create a temp file path.
-    # Safety: Creates an empty temp file.
-    # Important: must not write anything except the path to stdout.
-    mktemp -t mc-leaner.XXXXXX 2>/dev/null
-  }
-fi
 
 _brew_tmpfile() {
   # Purpose: Create a temp file path for this module only.
   # Safety: Creates an empty temp file.
   # Rationale: Do not call shared tmpfile() in command substitution because it may log to stdout.
-  mktemp -t mc-leaner.XXXXXX 2>/dev/null
+  local p
+  p="$(mktemp -t mc-leaner_brew.XXXXXX 2>/dev/null || true)"
+  [[ -n "${p:-}" ]] || return 1
+
+  # Register for cleanup (safe under set -u)
+  BREW_TMPFILES+=("${p}")
+
+  printf '%s' "${p}"
 }
 
 _brew_array_len() {
@@ -74,22 +89,6 @@ _brew_array_len() {
   fi
 }
 
-_brew_array_copy() {
-  # Purpose: copy array values safely under `set -u`
-  # Inputs: src var name, dest var name
-  local src="$1"
-  local dest="$2"
-  # Same nuance as `_brew_array_len`: declared-but-unset arrays must be treated as empty.
-  if declare -p "$src" >/dev/null 2>&1; then
-    if eval '[[ ${'"$src"'[@]+x} ]]'; then
-      eval "$dest=(\"\${$src[@]}\")"
-    else
-      eval "$dest=()"
-    fi
-  else
-    eval "$dest=()"
-  fi
-}
 
 _brew_exists() {
   # Purpose: check whether Homebrew is installed
@@ -139,10 +138,53 @@ _brew_dir_mb() {
   _brew_kb_to_mb "${kb}"
 }
 
+
 _brew_sorted_unique_lines() {
   # Purpose: normalize text list (sorted unique)
   # Usage: echo "$text" | _brew_sorted_unique_lines
   sort | awk 'NF' | uniq
+}
+
+_brew_display_path() {
+  # Purpose: display a path without leaking full filesystem paths.
+  # Behavior:
+  #   - explain=true: show basename only, prefixed with ".../" (never full path)
+  #   - explain=false: print "redacted"
+  local p="${1:-}"
+
+  if [[ "${BREW_EXPLAIN:-false}" == "true" ]]; then
+    local b=""
+    b="$(basename "${p}" 2>/dev/null || printf '%s' '')"
+    if [[ -n "${b}" ]]; then
+      printf '%s' ".../${b}"
+    else
+      printf '%s' '.../<path>'
+    fi
+    return 0
+  fi
+
+  printf '%s' 'redacted'
+}
+
+_brew_display_path() {
+  # Purpose: display a path without leaking full filesystem paths.
+  # Behavior:
+  #   - explain=true: show basename only, prefixed with ".../" (never full path)
+  #   - explain=false: print "redacted"
+  local p="${1:-}"
+
+  if [[ "${BREW_EXPLAIN:-false}" == "true" ]]; then
+    local b=""
+    b="$(basename "${p}" 2>/dev/null || printf '%s' '')"
+    if [[ -n "${b}" ]]; then
+      printf '%s' ".../${b}"
+    else
+      printf '%s' ".../<path>"
+    fi
+    return 0
+  fi
+
+  printf '%s' 'redacted'
 }
 
 _brew_list_formulae() {
@@ -251,7 +293,7 @@ _brew_top_n_largest_formulae() {
 
     log "BREW SIZE: ${f} | ${mb}MB | versions: ${versions:-unknown}"
     BREW_TOP_SIZES+=("${f}|${mb}|${versions:-unknown}")
-    if [[ "${EXPLAIN:-false}" == "true" ]]; then
+    if [[ "${BREW_EXPLAIN}" == "true" ]]; then
       explain_log "  source: Cellar size (single-pass scan)"
     fi
   done < <(sort -t '|' -k1,1nr "${tmp}" 2>/dev/null | head -n "$n" 2>/dev/null)
@@ -267,10 +309,12 @@ _brew_cache_downloads_summary() {
 
   local root_mb
   root_mb="$(_brew_dir_mb "$cache_root")"
-  log "BREW CACHE: Homebrew | ${root_mb}MB | path: ${cache_root}"
-  BREW_CACHE_LINES+=("BREW CACHE: Homebrew | ${root_mb}MB | path: ${cache_root}")
+  local cache_root_disp
+  cache_root_disp="$(_brew_display_path "${cache_root}")"
+  log "BREW CACHE: Homebrew | ${root_mb}MB | path: ${cache_root_disp}"
+  BREW_CACHE_LINES+=("BREW CACHE: Homebrew | ${root_mb}MB | path: ${cache_root_disp}")
 
-  if [[ "${EXPLAIN:-false}" == "true" ]]; then
+  if [[ "${BREW_EXPLAIN}" == "true" ]]; then
     # Top 3 subfolders by size (best-effort)
     # Avoid temp files and redirections here to prevent weird failure modes under piped output.
     find "$cache_root" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null \
@@ -283,7 +327,7 @@ _brew_cache_downloads_summary() {
       | head -n 3 2>/dev/null \
       | while IFS='|' read -r mb p; do
           [[ -n "${p:-}" ]] || continue
-          explain_log "  cache subdir: ${mb}MB | ${p}"
+          explain_log "  cache subdir: ${mb}MB | $(_brew_display_path "${p}")"
         done
   fi
 
@@ -318,21 +362,60 @@ _brew_cache_downloads_summary() {
 # Module Entry Point
 # ----------------------------
 run_brew_module() {
-  # Args:
-  #  $1 apply (true/false)  [ignored; module is inspection-only]
-  #  $2 backup dir          [ignored]
-  #  $3 explain (true/false)
-  local _apply="$1"
-  local _backup_dir="$2"
-  local explain="$3"
+  # Contract:
+  #   run_brew_module <mode> <apply> <backup_dir> <explain> [inventory_index_file]
+  local mode="${1:-scan}"
+  local apply="${2:-false}"
+  local backup_dir="${3:-}"
+  local explain="${4:-false}"
+  local inventory_index_file="${5:-}"
+
+  # Reserved args for contract consistency.
+  : "${mode}" "${backup_dir}" "${inventory_index_file}"
+
+  # Module-scoped explain flag (do not mutate global EXPLAIN)
+  BREW_EXPLAIN="${explain}"
 
   # Inputs
-  log "Homebrew: mode=brew-only apply=${_apply} backup_dir=${_backup_dir} explain=${explain} (read-only module; apply ignored)"
+  log "Homebrew: mode=${mode} apply=${apply} backup_dir=${backup_dir} explain=${explain} (read-only module; apply ignored)"
 
-  EXPLAIN="$explain"
+  # Stable exported summary fields (must be set even on early returns).
+  BREW_FLAGGED_COUNT="0"
+  BREW_FLAGGED_IDS_LIST=""
+  BREW_FORMULAE_COUNT="0"
+  BREW_CASKS_COUNT="0"
+  BREW_OUTDATED_UNPINNED_COUNT="0"
+  BREW_OUTDATED_PINNED_COUNT="0"
+  BREW_LEAVES_COUNT="0"
+  BREW_DUR_S=0
 
-  # Defensive: make sure summary arrays exist even if this file is sourced in an unexpected order
-  declare -a BREW_LEAVES_LIST BREW_OUTDATED_UNPINNED BREW_OUTDATED_PINNED BREW_TOP_SIZES BREW_CACHE_LINES BREW_FLAGGED_ITEMS
+  # Timing + temp cleanup (RETURN trap)
+  local _brew_t0="" _brew_t1=""
+  _brew_t0="$(/bin/date +%s 2>/dev/null || printf '')"
+
+  _brew_finish_timing() {
+    _brew_t1="$(/bin/date +%s 2>/dev/null || printf '')"
+    if [[ "${_brew_t0:-}" =~ ^[0-9]+$ && "${_brew_t1:-}" =~ ^[0-9]+$ ]]; then
+      BREW_DUR_S=$((_brew_t1 - _brew_t0))
+    else
+      BREW_DUR_S=0
+    fi
+  }
+
+  _brew_tmp_cleanup() {
+    local f
+    for f in "${BREW_TMPFILES[@]:-}"; do
+      [[ -n "${f}" && -e "${f}" ]] && rm -f "${f}" 2>/dev/null || true
+    done
+    BREW_TMPFILES=()
+  }
+
+  _brew_on_return() {
+    _brew_finish_timing
+    _brew_tmp_cleanup
+  }
+  trap _brew_on_return RETURN
+
 
   # Reset summary buckets per run
   BREW_LEAVES_LIST=()
@@ -344,12 +427,15 @@ run_brew_module() {
 
   if ! _brew_exists; then
     log "Homebrew not found, skipping brew hygiene."
+    if type summary_add >/dev/null 2>&1; then
+      summary_add "brew" "present=false formulae=0 casks=0 outdated_unpinned=0 outdated_pinned=0 leaves=0 flagged=0"
+    fi
     return 0
   fi
 
   log "Homebrew: scanning installation (inspection-first)..."
 
-  if [[ "${EXPLAIN:-false}" == "true" ]]; then
+  if [[ "${BREW_EXPLAIN}" == "true" ]]; then
     if [[ "${INVENTORY_READY:-false}" == "true" ]]; then
       if [[ -n "${INVENTORY_BREW_FORMULAE_FILE:-}" || -n "${INVENTORY_BREW_FORMULAE:-}" ]]; then
         explain_log "Inventory (brew): using inventory-provided formula list"
@@ -377,26 +463,29 @@ run_brew_module() {
   log "BREW SUMMARY:"
   log "  formulas: ${n_formulae}"
   log "  casks: ${n_casks}"
+  BREW_FORMULAE_COUNT="${n_formulae}"
+  BREW_CASKS_COUNT="${n_casks}"
 
   # Leaves (not depended on by other formulae). Leaves are not necessarily unused.
   local leaves
   leaves="$(_brew_leaves)"
   if [[ -n "$leaves" ]]; then
     log "BREW LEAVES (not depended on by other formulae):"
-    if [[ "${EXPLAIN:-false}" == "true" ]]; then
+    if [[ "${BREW_EXPLAIN}" == "true" ]]; then
       explain_log "  note: leaves may still be actively used (explicit installs)."
     fi
     while IFS= read -r f; do
       [[ -n "$f" ]] || continue
       BREW_LEAVES_LIST+=("$f")
       log "  ${f}"
-      if [[ "${EXPLAIN:-false}" == "true" ]]; then
+      if [[ "${BREW_EXPLAIN}" == "true" ]]; then
         explain_log "    reason: brew leaves (no other formula depends on it)"
       fi
     done <<< "$(printf '%s\n' "$leaves" | awk 'NF')"
   else
     log "BREW LEAVES (not depended on by other formulae): none"
   fi
+  BREW_LEAVES_COUNT="$(_brew_array_len BREW_LEAVES_LIST)"
 
   # Outdated (split pinned vs unpinned)
   local outdated_f
@@ -444,7 +533,7 @@ run_brew_module() {
     log "BREW OUTDATED BUT PINNED (formulae):"
     printf '%s\n' "$outdated_pinned" | awk 'NF' | while IFS= read -r line; do
       log "  ${line}"
-      if [[ "${EXPLAIN:-false}" == "true" ]]; then
+      if [[ "${BREW_EXPLAIN}" == "true" ]]; then
         explain_log "    note: pinned formulae are excluded from brew upgrade"
       fi
     done
@@ -458,6 +547,8 @@ run_brew_module() {
   else
     log "BREW OUTDATED (casks): none"
   fi
+  BREW_OUTDATED_UNPINNED_COUNT="$(_brew_array_len BREW_OUTDATED_UNPINNED)"
+  BREW_OUTDATED_PINNED_COUNT="$(_brew_array_len BREW_OUTDATED_PINNED)"
 
   # Disk usage top N
   log "BREW DISK USAGE (top 10 formulae by Cellar size):"
@@ -539,23 +630,15 @@ run_brew_module() {
 
   log "Homebrew: inspection-only (read-only). No cleanup actions are performed."
 
+  # Export flagged identifiers list for run summary consumption.
+  BREW_FLAGGED_COUNT="$(_brew_array_len BREW_FLAGGED_ITEMS)"
+  BREW_FLAGGED_IDS_LIST="$({ printf '%s\n' "${BREW_FLAGGED_ITEMS[@]:-}"; } 2>/dev/null || true)"
+
   # ----------------------------
   # Global summary hook
   # ----------------------------
-  # Note: under `set -u`, expanding an unset array errors. Defensive-copy to a local array.
-  local -a _brew_flags
-  _brew_array_copy BREW_FLAGGED_ITEMS _brew_flags
-
-  local brew_flags_len
-  brew_flags_len="$(_brew_array_len _brew_flags)"
-
-  if [[ "$brew_flags_len" -gt 0 ]]; then
-    summary_add "brew" \
-      "formulae=${n_formulae}, casks=${n_casks}, outdated_unpinned=${#BREW_OUTDATED_UNPINNED[@]}, leaves=${#BREW_LEAVES_LIST[@]}" \
-      "${_brew_flags[@]}"
-  else
-    summary_add "brew" \
-      "formulae=${n_formulae}, casks=${n_casks}, outdated_unpinned=${#BREW_OUTDATED_UNPINNED[@]}, leaves=${#BREW_LEAVES_LIST[@]}"
+  if type summary_add >/dev/null 2>&1; then
+    summary_add "brew" "present=true formulae=${BREW_FORMULAE_COUNT} casks=${BREW_CASKS_COUNT} outdated_unpinned=${BREW_OUTDATED_UNPINNED_COUNT} outdated_pinned=${BREW_OUTDATED_PINNED_COUNT} leaves=${BREW_LEAVES_COUNT} flagged=${BREW_FLAGGED_COUNT}"
   fi
 }
 

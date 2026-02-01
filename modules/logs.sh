@@ -109,7 +109,7 @@ _logs_rotations_summary() {
   matches=$(ls -1 "$dir" 2>/dev/null | grep -E "^${base_re}(\\.[0-9]+)?(\\.gz)?$|^${base_re}\\.old$" || true)
   [[ -n "$matches" ]] || return 0
 
-  explain_log "  Rotated (same dir):"
+  _logs_explain "  Rotated (same dir):"
 
   # Print each match with size
   echo "$matches" | while IFS= read -r f; do
@@ -120,7 +120,7 @@ _logs_rotations_summary() {
     kb=$(du -sk "$fp" 2>/dev/null | awk '{print $1}' || echo "0")
     local mb
     mb=$((kb / 1024))
-    explain_log "    - ${mb}MB | ${f}"
+    _logs_explain "    - ${mb}MB | ${f}"
   done
 }
 
@@ -225,13 +225,34 @@ run_logs_module() {
   # Inputs
   log "Logs: apply=${apply} backup_dir=${backup_dir} explain=${explain} threshold_mb=${threshold_mb:-<none>}"
 
+  # Stable exported summary fields (must be set even on early returns).
+  LOGS_FLAGGED_COUNT="0"
+  LOGS_TOTAL_MB="0"
+  LOGS_MOVED_COUNT="0"
+  LOGS_FAILURES_COUNT="0"
+  LOGS_SCANNED_DIRS="0"
+  LOGS_THRESHOLD_MB="${threshold_mb:-50}"
+  LOGS_FLAGGED_IDS_LIST=""
+
+  _logs_explain() {
+    [[ "${explain}" == "true" ]] || return 0
+    # Prefer shared explain_log when present; fall back to normal log.
+    if type explain_log >/dev/null 2>&1; then
+      explain_log "$@"
+    else
+      log "$@"
+    fi
+  }
+
   # Timing (best-effort wall clock duration for this module).
   local _logs_t0="" _logs_t1=""
   _logs_t0="$(/bin/date +%s 2>/dev/null || echo '')"
   LOGS_DUR_S=0
 
+  local -a _logs_tmpfiles
+  _logs_tmpfiles=()
+
   _logs_finish_timing() {
-    # SAFETY: must be safe under `set -u` and when invoked on early returns.
     _logs_t1="$(/bin/date +%s 2>/dev/null || printf '')"
 
     # Guard arithmetic in strict mode: only compute if both are integers.
@@ -240,15 +261,20 @@ run_logs_module() {
     else
       LOGS_DUR_S=0
     fi
-
-    # Restore caller's EXPLAIN setting.
-    EXPLAIN="${_logs_prev_explain:-false}"
   }
 
-  trap _logs_finish_timing RETURN
+  _logs_tmp_cleanup() {
+    local f
+    for f in "${_logs_tmpfiles[@]:-}"; do
+      [[ -n "${f}" && -e "${f}" ]] && rm -f "${f}" 2>/dev/null || true
+    done
+  }
 
-  local _logs_prev_explain="${EXPLAIN:-false}"
-  EXPLAIN="${explain}"
+  _logs_on_return() {
+    _logs_finish_timing
+    _logs_tmp_cleanup
+  }
+  trap _logs_on_return RETURN
 
   # End-of-run contract arrays
   local -a flagged_items=()
@@ -277,9 +303,12 @@ run_logs_module() {
     "/var/log"
   )
 
+  local scanned_dirs=0
+
   local tmp
   tmp="$(tmpfile)"
   : > "$tmp"
+  _logs_tmpfiles+=("${tmp}")
 
   # Collect candidates: both files and directories.
   # We keep the scan conservative and bounded:
@@ -289,7 +318,7 @@ run_logs_module() {
   for loc in "${locations[@]}"; do
     [[ -e "$loc" ]] || continue
 
-    explain_log "Logs (explain): sizing $loc"
+    _logs_explain "Logs (explain): sizing $loc"
 
     # Enumerate immediate children only to keep scan fast.
     # Users can drill down with explain mode.
@@ -297,10 +326,12 @@ run_logs_module() {
     for child in "$loc"/*; do
       [[ -e "$child" ]] || continue
 
+      scanned_dirs=$((scanned_dirs + 1))
+
       # Skip known protected/security patterns (best-effort)
       case "$child" in
         *bitdefender*|*malwarebytes*|*crowdstrike*|*sentinel*|*sophos*|*carbonblack*|*defender*|*endpoint*)
-          explain_log "Logs: SKIP (protected): $child"
+          _logs_explain "Logs: SKIP (protected): $child"
           continue
           ;;
       esac
@@ -329,14 +360,20 @@ run_logs_module() {
   local found
   found=$(wc -l < "$tmp" 2>/dev/null | tr -d ' ' || echo "0")
 
+  LOGS_SCANNED_DIRS="${scanned_dirs}"
+
   if [[ "$found" -eq 0 ]]; then
     log "Logs: no large log items found (by threshold)."
+    if type summary_add >/dev/null 2>&1; then
+      summary_add "logs" "flagged=0 total_mb=0 moved=0 failures=0 scanned=${scanned_dirs} threshold_mb=${threshold_mb}"
+    fi
     return 0
   fi
 
   # Sort by owner then size desc
   local sorted
   sorted="$(tmpfile)"
+  _logs_tmpfiles+=("${sorted}")
   sort -t '|' -k1,1 -k2,2nr "$tmp" > "$sorted" 2>/dev/null || cp "$tmp" "$sorted"
 
   local total_mb=0
@@ -359,12 +396,12 @@ run_logs_module() {
     flagged_ids+=("${path}")
 
     # Explain output: rotations + reason
-    if [[ "${EXPLAIN:-false}" == "true" ]]; then
-      explain_log "  reason: >= ${threshold_mb}MB"
+    if [[ "${explain}" == "true" ]]; then
+      _logs_explain "  reason: >= ${threshold_mb}MB"
 
       # For user-level Logs/<owner>, also show top subfolders for directories
       if [[ -d "$path" ]]; then
-        explain_log "  Subfolders (top 3 by size):"
+        _logs_explain "  Subfolders (top 3 by size):"
 
         # NOTE: with `set -euo pipefail`, a pipeline fails the whole script if any stage
         # returns non-zero. When a directory has no children, the glob may not match and
@@ -379,11 +416,11 @@ run_logs_module() {
             | while IFS=$'\t' read -r skb sub; do
                 [[ -n "${skb:-}" && -n "${sub:-}" ]] || continue
                 local smb=$((skb / 1024))
-                explain_log "    - ${smb}MB | ${sub}"
+                _logs_explain "    - ${smb}MB | ${sub}"
               done \
             || true
         else
-          explain_log "    (no subfolders)"
+          _logs_explain "    (no subfolders)"
         fi
       else
         _logs_rotations_summary "$path"
@@ -405,9 +442,9 @@ run_logs_module() {
         else
           local rc=$?
           if [[ "$rc" -eq 2 ]]; then
-            explain_log "Logs: SKIP (non-interactive; cannot prompt): $path"
+            _logs_explain "Logs: SKIP (non-interactive; cannot prompt): $path"
           else
-            explain_log "Logs: SKIP (user declined): $path"
+            _logs_explain "Logs: SKIP (user declined): $path"
           fi
         fi
       else
@@ -424,9 +461,9 @@ run_logs_module() {
         else
           local rc=$?
           if [[ "$rc" -eq 2 ]]; then
-            explain_log "Logs: SKIP (non-interactive; cannot prompt): $path"
+            _logs_explain "Logs: SKIP (non-interactive; cannot prompt): $path"
           else
-            explain_log "Logs: SKIP (user declined): $path"
+            _logs_explain "Logs: SKIP (user declined): $path"
           fi
         fi
       fi
@@ -451,20 +488,21 @@ run_logs_module() {
 
   log "Logs: total large log items (by threshold): ${total_mb}MB"
 
-  # Export flagged identifiers list (paths) for run summary consumption.
-  LOGS_FLAGGED_IDS_LIST="$(printf '%s\n' "${flagged_ids[@]}")"
   LOGS_FLAGGED_COUNT="${#flagged_ids[@]}"
+  LOGS_TOTAL_MB="${total_mb}"
+  LOGS_MOVED_COUNT="${moved_count}"
+  LOGS_FAILURES_COUNT="${#move_failures[@]}"
+  LOGS_SCANNED_DIRS="${scanned_dirs}"
+  LOGS_THRESHOLD_MB="${threshold_mb}"
+
+  LOGS_FLAGGED_IDS_LIST="$({ printf '%s\n' "${flagged_ids[@]:-}"; } 2>/dev/null || true)"
   LOGS_DUR_S="${LOGS_DUR_S:-0}"
 
   # ----------------------------
   # Global summary contribution
   # ----------------------------
   if type summary_add >/dev/null 2>&1; then
-    # Module Output Contract: end-of-run summary line
-    # Format: <Module> flagged=<n> total_mb=<n> moved=<n> failures=<n>
-    # Notes:
-    # - This module does not currently track successful moves (only failures). We report moved=0 for now.
-    summary_add "Logs flagged=${#flagged_items[@]} total_mb=${total_mb} moved=${moved_count} failures=${#move_failures[@]}"
+    summary_add "logs" "flagged=${#flagged_items[@]} total_mb=${total_mb} moved=${moved_count} failures=${#move_failures[@]} scanned=${scanned_dirs} threshold_mb=${threshold_mb}"
   fi
 
   if [[ "$apply" != "true" ]]; then

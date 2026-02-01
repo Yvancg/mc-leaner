@@ -6,27 +6,75 @@
 
 
 # NOTE: Modules run with strict mode for deterministic failures and auditability.
-set -euo pipefail
+set -uo pipefail
 
 # ----------------------------
 # Module Entry Point
 # ----------------------------
 
+# ----------------------------
+# Log Path Redaction
+# ----------------------------
+_bins_log_path() {
+  # Purpose: Avoid printing temp file paths outside --explain.
+  # - When explain=true: return basename with a stable hint prefix.
+  # - Otherwise: return "redacted".
+  # Safety: logging only.
+  local p="${1:-}"
+  local explain="${2:-false}"
+
+  [[ -n "${p}" ]] || { printf '%s' "<none>"; return 0; }
+
+  if [[ "${explain}" == "true" ]]; then
+    local b=""
+    b="$(basename "${p}" 2>/dev/null || true)"
+    if [[ -n "${b}" ]]; then
+      printf '%s' ".../${b}"
+      return 0
+    fi
+  fi
+
+  printf '%s' "redacted"
+  return 0
+}
+
 run_bins_module() {
+  # Contract:
+  #   run_bins_module <mode> <apply> <backup_dir> <explain> [inventory_index_file]
   local mode="${1:-scan}"
   local apply="${2:-false}"
   local backup_dir="${3:-}"
-  local inventory_index_file="${4:-}"
+  local explain="${4:-false}"
+  local inventory_index_file="${5:-}"
+
+  # Defensive: some dispatchers have historically passed the inventory path as the
+  # 4th argument (where <explain> should be). If <explain> is not a boolean but
+  # looks like a file path, treat it as the inventory file and default explain=false.
+  if [[ "${explain}" != "true" && "${explain}" != "false" && -z "${inventory_index_file}" ]]; then
+    if [[ -f "${explain}" || "${explain}" == /* ]]; then
+      inventory_index_file="${explain}"
+      explain="false"
+    fi
+  fi
 
   # Reserved args for contract consistency.
-  : "${mode}" "${backup_dir}"
+  : "${mode}" "${backup_dir}" "${explain}"
 
   # Inputs
-  log "Bins: mode=${mode} apply=${apply} backup_dir=${backup_dir} inventory_index=${inventory_index_file:-<none>}"
+  log "Bins: mode=${mode} apply=${apply} backup_dir=${backup_dir} explain=${explain} inventory_index=$(_bins_log_path "${inventory_index_file:-}" "${explain}")"
+  if [[ "${explain}" == "true" ]]; then
+    explain_log "Bins (explain): scanning /usr/local/bin"
+  fi
 
   # Export flagged identifiers list for run summary consumption (stable contract even when empty).
   BINS_FLAGGED_IDS_LIST=""
   BINS_FLAGGED_COUNT="0"
+
+  # Module timing (seconds). Used by the end-of-run timing summary.
+  local _bins_t0=""
+  local _bins_t1=""
+  _bins_t0="$(/bin/date +%s 2>/dev/null || echo '')"
+  BINS_DUR_S=0
 
   # ----------------------------
   # Target Directory
@@ -50,8 +98,22 @@ run_bins_module() {
     done
   }
 
+  _bins_finish_timing() {
+    _bins_t1="$(/bin/date +%s 2>/dev/null || echo '')"
+    if [[ -n "${_bins_t0:-}" && -n "${_bins_t1:-}" && "${_bins_t0}" =~ ^[0-9]+$ && "${_bins_t1}" =~ ^[0-9]+$ ]]; then
+      BINS_DUR_S=$((_bins_t1 - _bins_t0))
+    else
+      BINS_DUR_S=0
+    fi
+  }
+
   # Single RETURN trap per function (bash only keeps one handler per signal).
-  trap _bins_tmp_cleanup RETURN
+  # Safety: timing + tmp cleanup only; no behavior changes to scan/clean logic.
+  _bins_on_return() {
+    _bins_finish_timing
+    _bins_tmp_cleanup
+  }
+  trap _bins_on_return RETURN
 
   if [[ -n "$inventory_index_file" && -s "$inventory_index_file" ]]; then
     inv_keys_file="$(mktemp -t mc-leaner_bins_invkeys.XXXXXX 2>/dev/null || true)"
@@ -59,6 +121,13 @@ run_bins_module() {
       _bins_tmpfiles+=("$inv_keys_file")
       # inventory index format: key<TAB>name<TAB>source<TAB>path
       cut -f1 "$inventory_index_file" | LC_ALL=C sort -u > "$inv_keys_file" 2>/dev/null || true
+    fi
+  fi
+
+  if [[ -z "$inv_keys_file" ]]; then
+    log "Bins: inventory index not provided; falling back to heuristics only (may increase false positives)."
+    if [[ "${explain}" == "true" ]]; then
+      explain_log "Bins (explain): inventory index not provided; using heuristics only"
     fi
   fi
 
@@ -150,9 +219,6 @@ run_bins_module() {
   local flagged_items=()
   local move_failures=()
   log "Checking $dir for orphaned binaries (heuristic)..."
-  if [[ -z "$inv_keys_file" ]]; then
-    log "Bins: inventory index not provided; falling back to heuristics only (may increase false positives)."
-  fi
   for bin_path in "$dir"/*; do
     [[ -x "$bin_path" ]] || continue
     local base
@@ -181,7 +247,7 @@ run_bins_module() {
       local app_ref=""
       app_ref="$(_bins_script_shim_app_bundle_ref "$bin_path")"
 
-      if [[ "${EXPLAIN:-false}" == "true" ]]; then
+      if [[ "${explain}" == "true" ]]; then
         if [[ -n "${app_ref:-}" ]]; then
           explain_log "Bins: script shim detected: bin=${bin_path} app_ref=${app_ref}"
         else
@@ -196,7 +262,9 @@ run_bins_module() {
         fi
 
         # Shim points at a missing app bundle: keep scanning logic but annotate.
-        explain_log "Bins: script shim missing app (classified orphan): bin=${bin_path} app_ref=${app_ref}"
+        if [[ "${explain}" == "true" ]]; then
+          explain_log "Bins: script shim missing app (classified orphan): bin=${bin_path} app_ref=${app_ref}"
+        fi
         log "ORPHAN? $bin_path (script shim references missing app: $app_ref)"
         flagged_count=$((flagged_count + 1))
         flagged_items+=("${bin_path}")
@@ -247,8 +315,10 @@ run_bins_module() {
     # Keep exported values stable even when nothing is flagged.
     BINS_FLAGGED_IDS_LIST=""
     BINS_FLAGGED_COUNT="0"
+    BINS_DUR_S="${BINS_DUR_S:-0}"
 
     log "No orphaned /usr/local/bin items found (by heuristics)."
+    log "Bins: inspected $(ls -1 "${dir}" 2>/dev/null | wc -l | tr -d ' ') entries; flagged=0."
     summary_add "bins" "flagged=0"
     return 0
   fi
@@ -278,6 +348,7 @@ run_bins_module() {
   # Export flagged identifiers list for run summary consumption.
   BINS_FLAGGED_IDS_LIST="$({ printf '%s\n' "${flagged_items[@]:-}"; } 2>/dev/null || true)"
   BINS_FLAGGED_COUNT="${flagged_count}"
+  BINS_DUR_S="${BINS_DUR_S:-0}"
 
   # ----------------------------
   # Summary

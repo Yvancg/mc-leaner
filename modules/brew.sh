@@ -60,9 +60,8 @@ fi
 _brew_tmpfile() {
   # Purpose: Create a temp file path for this module only.
   # Safety: Creates an empty temp file.
-  # Rationale: Do not call shared tmpfile() in command substitution because it may log to stdout.
   local p
-  p="$(mktemp -t mc-leaner_brew.XXXXXX 2>/dev/null || true)"
+  p="$(tmpfile_new "mc-leaner.brew")"
   [[ -n "${p:-}" ]] || return 1
 
   # Register for cleanup (safe under set -u)
@@ -151,19 +150,7 @@ _brew_display_path() {
   #   - explain=true: show basename only, prefixed with ".../" (never full path)
   #   - explain=false: print "redacted"
   local p="${1:-}"
-
-  if [[ "${BREW_EXPLAIN:-false}" == "true" ]]; then
-    local b=""
-    b="$(basename "${p}" 2>/dev/null || printf '%s' '')"
-    if [[ -n "${b}" ]]; then
-      printf '%s' ".../${b}"
-    else
-      printf '%s' ".../<path>"
-    fi
-    return 0
-  fi
-
-  printf '%s' 'redacted'
+  redact_path_for_log "${p}" "${BREW_EXPLAIN:-false}"
 }
 
 _brew_list_formulae() {
@@ -383,16 +370,11 @@ run_brew_module() {
     _brew_t1="$(/bin/date +%s 2>/dev/null || printf '')"
     if [[ "${_brew_t0:-}" =~ ^[0-9]+$ && "${_brew_t1:-}" =~ ^[0-9]+$ ]]; then
       BREW_DUR_S=$((_brew_t1 - _brew_t0))
-    else
-      BREW_DUR_S=0
     fi
   }
 
   _brew_tmp_cleanup() {
-    local f
-    for f in "${BREW_TMPFILES[@]:-}"; do
-      [[ -n "${f}" && -e "${f}" ]] && rm -f "${f}" 2>/dev/null || true
-    done
+    tmpfile_cleanup "${BREW_TMPFILES[@]:-}"
     BREW_TMPFILES=()
   }
 

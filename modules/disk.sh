@@ -136,51 +136,42 @@ _disk_kb_to_mb_round() {
 }
 
 
-_disk_normalize() {
-  # Purpose: Normalize a token (lowercase, strip non-alphanumerics).
-  printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:]'
-}
-
 # ----------------------------
 # Attribution Helpers
 # ----------------------------
 _disk_owner_from_inventory() {
-  # Best-effort lookup against an inventory index file.
-  # Heuristic: match normalized token anywhere on a line.
+  # Best-effort lookup against an inventory index file (strict keys only).
   # Output: prints owner string and returns 0 on success.
   local inventory_index_file="${1:-}"
-  local token_raw="${2:-}"
-  local token
-  token="$(_disk_normalize "$token_raw")"
+  local p="${2:-}"
+  local label="${3:-}"
 
-  if [[ -z "$inventory_index_file" || ! -f "$inventory_index_file" || -z "$token" ]]; then
+  if [[ -z "$inventory_index_file" || ! -f "$inventory_index_file" || -z "$p" ]]; then
     return 1
   fi
 
-  local line
-  line="$(LC_ALL=C grep -i -m 1 -E "(^|[^a-z0-9])${token}([^a-z0-9]|$)" "$inventory_index_file" 2>/dev/null || true)"
-  [[ -z "$line" ]] && return 1
+  local prev_inventory_index="${INVENTORY_INDEX_FILE:-}"
+  INVENTORY_INDEX_FILE="$inventory_index_file"
 
-  # Inventory index format (v2.0+): key<TAB>name<TAB>source<TAB>path
-  # Prefer the name (column 2) as the owner for correlation and readability.
-  local tsv_name
-  tsv_name="$(printf '%s\n' "$line" | /usr/bin/awk -F '\t' 'NF>=2{print $2; exit}' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-  if [[ -n "$tsv_name" ]]; then
-    printf '%s' "$tsv_name"
-    return 0
+  local base
+  base="${label:-$(basename "$p")}" 
+
+  local meta=""
+  if declare -F inventory_owner_lookup_meta >/dev/null 2>&1; then
+    meta="$(inventory_owner_lookup_meta "$base" "$p" "$inventory_index_file" 2>/dev/null || true)"
   fi
 
-  # Prefer an "owner:" segment when present.
+  if [[ -n "$prev_inventory_index" ]]; then
+    INVENTORY_INDEX_FILE="$prev_inventory_index"
+  else
+    unset INVENTORY_INDEX_FILE 2>/dev/null || true
+  fi
+
+  [[ -n "$meta" ]] || return 1
+
   local owner
-  owner="$(echo "$line" | sed -nE 's/.*owner:[[:space:]]*([^|,]+).*/\1/p' | head -n 1 | sed -E 's/[[:space:]]+$//')"
-  if [[ -n "$owner" ]]; then
-    printf '%s' "$owner"
-    return 0
-  fi
-
-  # Otherwise take first non-empty field split by tab or '|'.
-  owner="$(echo "$line" | awk -F'[\t|]' '{for(i=1;i<=NF;i++){gsub(/^[[:space:]]+|[[:space:]]+$/, "", $i); if($i!=""){print $i; exit}}}')"
-  [[ -n "$owner" ]] || return 1
+  owner="${meta%%$'\t'*}"
+  [[ -n "$owner" && "$owner" != "Unknown" ]] || return 1
   printf '%s' "$owner"
 }
 
@@ -194,7 +185,7 @@ _disk_infer_owner() {
 
   # 1) Inventory match (highest confidence)
   local inv_owner
-  inv_owner="$(_disk_owner_from_inventory "$inventory_index_file" "$b" || true)"
+  inv_owner="$(_disk_owner_from_inventory "$inventory_index_file" "$p" "$b" || true)"
   if [[ -n "$inv_owner" ]]; then
     printf '%s|%s' "$inv_owner" "high"
     return 0
@@ -378,7 +369,11 @@ run_disk_module() {
   local inventory_index_file="${5:-}"
 
   # Inputs
-  log_info "Disk: mode=${mode} apply=${apply} backup_dir=${backup_dir} explain=${explain} inventory_index=${inventory_index_file:-<none>} (inspection-only; apply ignored)"
+  local inventory_index_display="<none>"
+  if [[ -n "${inventory_index_file:-}" ]]; then
+    inventory_index_display="$(redact_path_for_log "${inventory_index_file}" "${explain}")"
+  fi
+  log_info "Disk: mode=${mode} apply=${apply} backup_dir=${backup_dir} explain=${explain} inventory_index=${inventory_index_display} (inspection-only; apply ignored)"
 
   # Reserved args for contract consistency (unused by this inspection-only module).
   : "${mode}" "${backup_dir}"
@@ -409,15 +404,16 @@ run_disk_module() {
   DISK_FLAGGED_RECORDS_LIST=""
 
   local tmp
-  tmp="$(mktemp -t mcleaner_disk.XXXXXX 2>/dev/null)" || {
+  tmp="$(tmpfile_new "mcleaner.disk")"
+  if [[ -z "${tmp}" || ! -e "${tmp}" ]]; then
     log_info "Disk: ERROR: failed to create temp file"
     return 1
-  }
+  fi
 
   # Ensure cleanup on all exits (without clobbering parent RETURN traps).
   local _old_return_trap=""
   _old_return_trap="$(trap -p RETURN 2>/dev/null || true)"
-  trap 'rm -f "${tmp}" 2>/dev/null || true' RETURN
+  trap 'tmpfile_cleanup "${tmp}"' RETURN
 
   _disk_collect_sizes "${tmp}" "${min_mb}"
 
@@ -494,6 +490,8 @@ run_disk_module() {
     trap - RETURN
   fi
   log_info "Disk: inspected ${checked} item(s); flagged=${flagged} total_mb=${total_mb} printed=${printed} (top_n=${top_n} threshold=${min_mb}MB)"
+
+  summary_add "disk" "inspected=${checked} flagged=${flagged} total_mb=${total_mb} printed=${printed} threshold_mb=${min_mb} top_n=${top_n}"
 }
 
 # End of module

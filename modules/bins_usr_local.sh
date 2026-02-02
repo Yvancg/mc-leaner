@@ -12,46 +12,23 @@ set -uo pipefail
 # Module Entry Point
 # ----------------------------
 
-# ----------------------------
-# Log Path Redaction
-# ----------------------------
-_bins_log_path() {
-  # Purpose: Avoid printing temp file paths outside --explain.
-  # - When explain=true: return basename with a stable hint prefix.
-  # - Otherwise: return "redacted".
-  # Safety: logging only.
-  local p="${1:-}"
-  local explain="${2:-false}"
-
-  [[ -n "${p}" ]] || { printf '%s' "<none>"; return 0; }
-
-  if [[ "${explain}" == "true" ]]; then
-    local b=""
-    b="$(basename "${p}" 2>/dev/null || true)"
-    if [[ -n "${b}" ]]; then
-      printf '%s' ".../${b}"
-      return 0
-    fi
-  fi
-
-  printf '%s' "redacted"
-  return 0
-}
-
 run_bins_module() {
   # Contract:
-  #   run_bins_module <mode> <apply> <backup_dir> <explain> [inventory_index_file]
+  #   run_bins_module <mode> <apply> <backup_dir> <explain> [inventory_index_file] [brew_bins_file]
   local mode="${1:-scan}"
   local apply="${2:-false}"
   local backup_dir="${3:-}"
   local explain="${4:-false}"
   local inventory_index_file="${5:-}"
+  local brew_bins_file="${6:-}"
 
   # Defensive: some dispatchers have historically passed the inventory path as the
   # 4th argument (where <explain> should be). If <explain> is not a boolean but
   # looks like a file path, treat it as the inventory file and default explain=false.
-  if [[ "${explain}" != "true" && "${explain}" != "false" && -z "${inventory_index_file}" ]]; then
+  if [[ "${explain}" != "true" && "${explain}" != "false" ]]; then
     if [[ -f "${explain}" || "${explain}" == /* ]]; then
+      # Shift legacy signature: explain=inventory_index, inventory_index=brew_bins.
+      brew_bins_file="${inventory_index_file}"
       inventory_index_file="${explain}"
       explain="false"
     fi
@@ -66,7 +43,7 @@ run_bins_module() {
   BINS_FLAGGED_IDS_LIST=""
   BINS_FLAGGED_COUNT="0"
 
-  log "Bins: mode=${mode} apply=${apply} backup_dir=${backup_dir} explain=${explain} inventory_index=$(_bins_log_path "${inventory_index_file:-}" "${explain}")"
+  log "Bins: mode=${mode} apply=${apply} backup_dir=${backup_dir} explain=${explain} inventory_index=$(redact_path_for_log "${inventory_index_file:-}" "${explain}")"
   if [[ "${explain}" == "true" ]]; then
     explain_log "Bins (explain): scanning /usr/local/bin"
   fi
@@ -97,19 +74,12 @@ run_bins_module() {
   local -a _bins_tmpfiles
   _bins_tmpfiles=()
 
-  _bins_tmp_cleanup() {
-    local f
-    for f in "${_bins_tmpfiles[@]:-}"; do
-      [[ -n "$f" && -e "$f" ]] && rm -f "$f" 2>/dev/null || true
-    done
-  }
+  _bins_tmp_cleanup() { tmpfile_cleanup "${_bins_tmpfiles[@]:-}"; }
 
   _bins_finish_timing() {
     _bins_t1="$(/bin/date +%s 2>/dev/null || echo '')"
     if [[ -n "${_bins_t0:-}" && -n "${_bins_t1:-}" && "${_bins_t0}" =~ ^[0-9]+$ && "${_bins_t1}" =~ ^[0-9]+$ ]]; then
       BINS_DUR_S=$((_bins_t1 - _bins_t0))
-    else
-      BINS_DUR_S=0
     fi
   }
 
@@ -122,7 +92,7 @@ run_bins_module() {
   trap _bins_on_return RETURN
 
   if [[ -n "$inventory_index_file" && -s "$inventory_index_file" ]]; then
-    inv_keys_file="$(mktemp -t mc-leaner_bins_invkeys.XXXXXX 2>/dev/null || true)"
+    inv_keys_file="$(tmpfile_new "mc-leaner.bins")"
     if [[ -n "$inv_keys_file" ]]; then
       _bins_tmpfiles+=("$inv_keys_file")
       # inventory index format: key<TAB>name<TAB>source<TAB>path
@@ -284,11 +254,12 @@ run_bins_module() {
         if [[ "$mode" == "clean" && "$apply" == "true" ]]; then
           if ask_yes_no "Orphaned binary detected:\n$bin_path\n\nReason: script shim references missing app bundle:\n$app_ref\n\nMove to backup folder?"; then
             local move_out=""
-            if ! move_out="$(safe_move "$bin_path" "$backup_dir" 2>&1)"; then
-              move_failures+=("$bin_path|$move_out")
-              log "Move failed: $bin_path"
-            else
+            if move_attempt "$bin_path" "$backup_dir"; then
+              move_out="${MOVE_LAST_DEST:-}"
               log "Moved: $bin_path -> $move_out"
+            else
+              move_failures+=("$bin_path|${MOVE_LAST_MESSAGE:-failed}")
+              log "Move failed: $bin_path"
             fi
           fi
         fi
@@ -314,11 +285,12 @@ run_bins_module() {
     if [[ "$mode" == "clean" && "$apply" == "true" ]]; then
       if ask_yes_no "Orphaned binary detected:\n$bin_path\n\nMove to backup folder?"; then
         local move_out=""
-        if ! move_out="$(safe_move "$bin_path" "$backup_dir" 2>&1)"; then
-          move_failures+=("$bin_path|$move_out")
-          log "Move failed: $bin_path"
-        else
+        if move_attempt "$bin_path" "$backup_dir"; then
+          move_out="${MOVE_LAST_DEST:-}"
           log "Moved: $bin_path -> $move_out"
+        else
+          move_failures+=("$bin_path|${MOVE_LAST_MESSAGE:-failed}")
+          log "Move failed: $bin_path"
         fi
       fi
     fi

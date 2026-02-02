@@ -62,9 +62,18 @@ If you want to understand what is running on your systemâ€”and clean it safelyâ€
 
 ## What mc-leaner does (current)
 
-As of v2.1.0, all modules follow a strict inspection-first contract, share a unified inventory core, and produce explicit, reviewable run summaries.
+As of v2.3.0, all modules follow a strict inspection-first contract, share a unified inventory core, and produce explicit, reviewable run summaries.
 
 ### Release highlights
+
+#### v2.3.0
+
+**Summary normalization & safer attribution**
+
+- Run summary now uses consistent `module key=value` formatting
+- Move-capable modules use the shared `move_attempt` contract for consistent failure reporting
+- Disk ownership attribution tightened to strict inventory matches to reduce false positives
+- Shared helper utilities reduce per-module duplication (temp files, redaction, attribution)
 
 #### v2.2.0
 

@@ -11,6 +11,33 @@ This project follows a pragmatic versioning scheme:
 ---
 
 # 
+# ## v2.3.0 — Summary normalization, move contract unification, and safer attribution
+
+**Release date:** 2026-02-02
+
+### Added
+
+- Shared helper utilities
+  - Centralized temp file creation/cleanup and path redaction helpers
+  - Inventory-backed owner lookup helper for consistent attribution
+
+### Changed
+
+- Run summary formatting
+  - Normalized module summary lines to `module key=value` format
+  - Reduced duplicate summary lines from the orchestrator
+
+- Move handling
+  - All move-capable modules now use the shared `move_attempt` contract
+  - Consistent failure classification and messaging
+
+- Disk ownership attribution
+  - Tightened inventory matching to strict index lookups (reduced false positives)
+
+### Fixed
+
+- Argument alignment for the bins module in the CLI dispatcher
+
 # ## v2.2.0 — Startup impact analysis, timing fixes, and module contract alignment
 
 **Release date:** 2026-01-27

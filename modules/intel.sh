@@ -33,19 +33,12 @@ run_intel_report() {
   local -a _intel_tmpfiles
   _intel_tmpfiles=()
 
-  _intel_tmp_cleanup() {
-    local f
-    for f in "${_intel_tmpfiles[@]:-}"; do
-      [[ -n "$f" && -e "$f" ]] && rm -f "$f" 2>/dev/null || true
-    done
-  }
+  _intel_tmp_cleanup() { tmpfile_cleanup "${_intel_tmpfiles[@]:-}"; }
 
   _intel_finish_timing() {
     _intel_t1="$(/bin/date +%s 2>/dev/null || echo '')"
     if [[ -n "${_intel_t0:-}" && -n "${_intel_t1:-}" && "${_intel_t0}" =~ ^[0-9]+$ && "${_intel_t1}" =~ ^[0-9]+$ ]]; then
       INTEL_DUR_S=$((_intel_t1 - _intel_t0))
-    else
-      INTEL_DUR_S=0
     fi
   }
 

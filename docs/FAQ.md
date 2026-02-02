@@ -10,7 +10,7 @@ mc-leaner is **safe by default**:
 - It never deletes files
 - All changes are reversible via a backup folder
 - Security and endpoint protection software is always skipped
-- All modules in v2.2.0 follow an inspection-first contract with explicit user confirmation for any changes
+- All modules in v2.3.0 follow an inspection-first contract with explicit user confirmation for any changes
 
 That said, mc-leaner is a **power tool**. You are expected to read prompts and understand what you approve.
 
@@ -70,6 +70,8 @@ mc-leaner flags items for **review**, not removal. If you still use an app, keep
 ## Why does the run summary list every flagged item?
 
 As of v2.2.0, mc-leaner always lists the identifiers of all flagged items in the end-of-run summary.
+
+As of v2.3.0, summary lines are normalized to a stable `module key=value` format for easier parsing and audits.
 
 This is intentional.
 

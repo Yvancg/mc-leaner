@@ -43,17 +43,7 @@ run_caches_module() {
   # Never leak raw temp paths in logs. Only show a basename (or a stable pattern) when --explain is enabled.
   local inventory_index_display="<none>"
   if [[ -n "${inventory_index_file:-}" ]]; then
-    if [[ "${explain}" == "true" ]]; then
-      local _inv_base=""
-      _inv_base="$(basename "${inventory_index_file}" 2>/dev/null || printf '%s' '')"
-      if [[ -n "${_inv_base:-}" ]]; then
-        inventory_index_display=".../${_inv_base}"
-      else
-        inventory_index_display=".../mc-leaner_inventory.*"
-      fi
-    else
-      inventory_index_display="redacted"
-    fi
+    inventory_index_display="$(redact_path_for_log "${inventory_index_file}" "${explain}")"
   fi
   # Use the sanitized path internally from here on.
 
@@ -105,17 +95,15 @@ run_caches_module() {
       && [[ "${_caches_t0}" =~ ^[0-9]+$ ]] \
       && [[ "${_caches_t1}" =~ ^[0-9]+$ ]]; then
       CACHES_DUR_S=$((_caches_t1 - _caches_t0))
-    else
-      CACHES_DUR_S=0
     fi
   }
 
   _caches_tmp_cleanup() {
     local f
     for f in "${_caches_tmpfiles[@]:-}"; do
-      [[ -n "${f}" && -e "${f}" ]] && rm -f "${f}" 2>/dev/null || true
       [[ -n "${f}" && -e "${f}.sorted" ]] && rm -f "${f}.sorted" 2>/dev/null || true
     done
+    tmpfile_cleanup "${_caches_tmpfiles[@]:-}"
   }
 
   _caches_on_return() {
@@ -379,23 +367,6 @@ run_caches_module() {
   }
 
   # ----------------------------
-  # Tempfile helper
-  # ----------------------------
-  _caches_tmpfile() {
-    # Purpose: create a temp file path (stdout only) without relying on shared tmpfile helper.
-    # Safety: creates an empty temp file and returns its path.
-    local t=""
-
-    t="$(/usr/bin/mktemp -t mc-leaner.XXXXXX 2>/dev/null || true)"
-    if [[ -z "${t}" ]]; then
-      t="/tmp/mc-leaner.${RANDOM}.${RANDOM}"
-      : >"${t}" 2>/dev/null || true
-    fi
-
-    printf '%s\n' "${t}"
-  }
-
-  # ----------------------------
   # Scan Targets (User-Level Only)
   # ----------------------------
   local home="$HOME"
@@ -404,12 +375,12 @@ run_caches_module() {
   CACHES_SCANNED_DIRS="0"
   local over_threshold=0
   local below_report_file
-  below_report_file="$(_caches_tmpfile 2>/dev/null | tail -n 1)"
+  below_report_file="$(tmpfile_new "mc-leaner.caches")"
   _caches_tmpfiles+=("${below_report_file}")
 
   # Collect candidates as "kb<TAB>path" so we can de-dup safely later.
   local candidate_list_file
-  candidate_list_file="$(_caches_tmpfile 2>/dev/null | tail -n 1)"
+  candidate_list_file="$(tmpfile_new "mc-leaner.caches")"
   _caches_tmpfiles+=("${candidate_list_file}")
 
 
@@ -479,7 +450,7 @@ run_caches_module() {
 
   # De-dup candidate paths (same cache dir may be discovered via multiple roots).
   local candidates_kb_path
-  candidates_kb_path="$(_caches_tmpfile 2>/dev/null | tail -n 1)"
+  candidates_kb_path="$(tmpfile_new "mc-leaner.caches")"
   _caches_tmpfiles+=("${candidates_kb_path}")
 
   if [[ -s "$candidate_list_file" ]]; then
@@ -520,7 +491,7 @@ run_caches_module() {
   local flagged_items=()
   local flagged_ids=()
   local move_failures=()
-  report_file="$(_caches_tmpfile 2>/dev/null | tail -n 1)"
+  report_file="$(tmpfile_new "mc-leaner.caches")"
   _caches_tmpfiles+=("${report_file}")
   local moved_count=0
 
@@ -593,7 +564,8 @@ run_caches_module() {
 
       if ask_yes_no "Large cache detected:\n${path}\n\nMove to backup (reversible)?"; then
         local move_out
-        if move_out="$(safe_move "$path" "$backup_dir" 2>&1)"; then
+        if move_attempt "$path" "$backup_dir"; then
+          move_out="${MOVE_LAST_DEST:-}"
           # Contract: log both source and resolved destination for legibility.
           if [[ "${explain}" == "true" ]]; then
             log "Moved: $path -> $move_out"
@@ -603,7 +575,8 @@ run_caches_module() {
           moved_count=$((moved_count + 1))
         else
           # Contract: keep the item flagged, but surface a clear move failure summary at end-of-run.
-          move_failures+=("$(_caches_display_path "${path}") | failed: $(_caches_display_path "${move_out}")")
+          local move_err="${MOVE_LAST_MESSAGE:-failed}"
+          move_failures+=("$(_caches_display_path "${path}") | failed: ${move_err}")
           if [[ "${explain}" == "true" ]]; then
             log "Caches: move failed: $path"
           else

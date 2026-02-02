@@ -32,16 +32,6 @@ if ! command -v service_emit_record >/dev/null 2>&1; then
 fi
 
 # ----------------------------
-# Local temp file helper (do NOT use shared tmpfile() here)
-# ----------------------------
-_launchd_tmpfile() {
-  # Purpose: Create a temp file for this module only.
-  # Safety: Creates an empty temp file.
-  # Important: must not write anything except the path to stdout.
-  mktemp -t mc-leaner.XXXXXX 2>/dev/null || true
-}
-
-# ----------------------------
 # Module Entry Point
 # ----------------------------
 run_launchd_module() {
@@ -51,11 +41,7 @@ run_launchd_module() {
   # Inputs
   local inv_disp="<none>"
   if [[ -n "${inventory_index_file:-}" ]]; then
-    if [[ "${EXPLAIN:-false}" == "true" ]]; then
-      inv_disp="${inventory_index_file}"
-    else
-      inv_disp="redacted"
-    fi
+    inv_disp="$(redact_path_for_log "${inventory_index_file}" "${EXPLAIN:-false}")"
   fi
   log "Launchd: mode=${mode} apply=${apply} backup_dir=${backup_dir} inventory_index=${inv_disp}"
 
@@ -68,8 +54,6 @@ run_launchd_module() {
     _launchd_t1="$(/bin/date +%s 2>/dev/null || echo '')"
     if [[ -n "${_launchd_t0:-}" && -n "${_launchd_t1:-}" && "${_launchd_t0}" =~ ^[0-9]+$ && "${_launchd_t1}" =~ ^[0-9]+$ ]]; then
       LAUNCHD_DUR_S=$((_launchd_t1 - _launchd_t0))
-    else
-      LAUNCHD_DUR_S=0
     fi
   }
 
@@ -86,12 +70,7 @@ run_launchd_module() {
   local active_jobs_file=""
   local _launchd_tmpfiles=()
 
-  _launchd_tmp_cleanup() {
-    local f
-    for f in "${_launchd_tmpfiles[@]:-}"; do
-      [[ -n "$f" && -e "$f" ]] && rm -f "$f" 2>/dev/null || true
-    done
-  }
+  _launchd_tmp_cleanup() { tmpfile_cleanup "${_launchd_tmpfiles[@]:-}"; }
   _launchd_on_return() {
     # Ensure we always compute duration and remove temp files.
     _launchd_finish_timing
@@ -101,7 +80,7 @@ run_launchd_module() {
 
   # Precompute inventory keys for fast membership checks (performance)
   if [[ -n "${inventory_index_file}" && -f "${inventory_index_file}" ]]; then
-    inventory_keys_file="$(_launchd_tmpfile)"
+    inventory_keys_file="$(tmpfile_new "mc-leaner.launchd")"
     if [[ -n "${inventory_keys_file:-}" ]]; then
       _launchd_tmpfiles+=("${inventory_keys_file}")
       # Column 1 contains keys; de-duplicate once (SIGPIPE-safe under piped output)
@@ -121,15 +100,12 @@ run_launchd_module() {
     # Safety: logging only; does not change behavior
     local checked_plists="$1"
 
-    local msg="checked=${checked_plists} plists; flagged=${flagged_count}"
-    if [[ "${move_fail_count}" -gt 0 ]]; then
-      msg+="; move_failures=${move_fail_count}"
-    fi
+    local msg="checked=${checked_plists} flagged=${flagged_count} move_failures=${move_fail_count}"
     if [[ "${mode}" == "clean" && "${apply}" == "true" ]]; then
-      msg+="; apply=enabled (per-item confirm)"
+      msg+=" apply=enabled"
     fi
 
-    summary_add "Launchd" "$msg"
+    summary_add "launchd" "$msg"
   }
 
   # ----------------------------
@@ -308,7 +284,7 @@ run_launchd_module() {
   # Snapshot Active launchctl Jobs
   # ----------------------------
   log "Scanning active launchctl jobs..."
-  active_jobs_file="$(_launchd_tmpfile)"
+  active_jobs_file="$(tmpfile_new "mc-leaner.launchd")"
   if [[ -n "${active_jobs_file:-}" ]]; then
     _launchd_tmpfiles+=("${active_jobs_file}")
 
@@ -489,20 +465,23 @@ run_launchd_module() {
       # SAFETY: move only in clean mode with --apply and per-item confirmation.
       if [[ "$mode" == "clean" && "$apply" == "true" ]]; then
         if ask_yes_no "Orphaned launch item detected:\n$plist_path\n\nMove to backup folder?"; then
-          # Move contract: safe_move prints the final destination path on success.
-          # On failure, it returns non-zero and prints a short diagnostic.
-          local move_out
-          if move_out="$(safe_move "$plist_path" "$backup_dir" 2>&1)"; then
+          # Move contract: move_attempt populates MOVE_LAST_* fields.
+          local move_out=""
+          if move_attempt "$plist_path" "$backup_dir"; then
+            move_out="${MOVE_LAST_DEST:-}"
             log "Moved: $plist_path -> $move_out"
           else
             move_fail_count=$((move_fail_count + 1))
-            move_failures+=("$plist_path | failed: $move_out")
-            log "Launchd: move failed: $plist_path | $move_out"
+            move_failures+=("$plist_path | failed: ${MOVE_LAST_MESSAGE:-failed}")
+            log "Launchd: move failed: $plist_path | ${MOVE_LAST_MESSAGE:-failed}"
           fi
         fi
       fi
     done
   done
+
+  # Export checked count for summaries (always set, even when no orphans).
+  LAUNCHD_CHECKED_COUNT="${checked}"
 
   if [[ "$orphan_found" -eq 0 ]]; then
     log "Launchd: no orphaned plists found (by heuristics)."
@@ -543,6 +522,7 @@ run_launchd_module() {
   LAUNCHD_FLAGGED_IDS_LIST="$({ printf '%s\n' "${flagged_items[@]}"; } 2>/dev/null || true)"
   LAUNCHD_FLAGGED_IDS_LIST="${LAUNCHD_FLAGGED_IDS_LIST%$'\n'}"
   LAUNCHD_FLAGGED_COUNT="${flagged_count}"
+  LAUNCHD_CHECKED_COUNT="${checked}"
   LAUNCHD_DUR_S="${LAUNCHD_DUR_S:-0}"
 
   _launchd_summary_emit "${checked}"

@@ -11,6 +11,7 @@ MODE="scan"
 APPLY="false"
 BACKUP_DIR=""
 EXPLAIN="false"
+STARTUP_INCLUDE_SYSTEM="false"
 
 # Supported modes are declared once to avoid drift between help text and validation.
 SUPPORTED_MODES=(
@@ -38,7 +39,7 @@ usage() {
 mc-leaner — inspection-first system hygiene with explicit run summaries
 
 Usage:
-  bash mc-leaner.sh [--mode <mode>] [--apply] [--backup-dir <path>] [--explain]
+  bash mc-leaner.sh [--mode <mode>] [--apply] [--backup-dir <path>] [--explain] [--startup-system]
 
 Modes:
   $(printf '%s' "${SUPPORTED_MODES[*]}" | tr ' ' '|')
@@ -53,6 +54,8 @@ Notes:
 
 Options:
   --explain       Show why items are skipped or flagged (verbose; allowed in all modes)
+  --startup-system
+                  Include system launchd items in startup scan (default: user-only)
 
 Examples:
   bash mc-leaner.sh
@@ -81,6 +84,7 @@ parse_args() {
       --apply) APPLY="true"; shift ;;
       --backup-dir) BACKUP_DIR="${2:-}"; shift 2 ;;
       --explain) EXPLAIN="true"; shift ;;
+      --startup-system) STARTUP_INCLUDE_SYSTEM="true"; shift ;;
       -h|--help) usage; exit 0 ;;
       # SAFETY: reject unknown flags to prevent accidental mode or apply changes
       *) echo "Unknown arg: $1"; usage; exit 1 ;;

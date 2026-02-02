@@ -264,41 +264,6 @@ _elapsed_s() {
   printf '%s\n' $(( end_s - start_s ))
 }
 
-_summary_add_list() {
-  # Usage: _summary_add_list <label> <newline_delimited_items> [max_items]
-  # Prints a header line and then one item per summary line (clean, grep-friendly).
-  local label="$1"
-  local items_nl="${2:-}"
-  local max_items="${3:-0}"
-
-  [[ -n "$items_nl" ]] || return 0
-
-  # Read items into an array (preserve spaces inside items).
-  local -a _items
-  while IFS= read -r _line; do
-    [[ -n "${_line}" ]] && _items+=("${_line}")
-  done <<< "$items_nl"
-
-  local total="${#_items[@]}"
-  [[ "$total" -gt 0 ]] || return 0
-
-  summary_add "${label}: flagged_items (${total})"
-
-  local i
-  local limit="$total"
-  if [[ "$max_items" =~ ^[0-9]+$ && "$max_items" -gt 0 && "$max_items" -lt "$total" ]]; then
-    limit="$max_items"
-  fi
-
-  for ((i=0; i<limit; i++)); do
-    summary_add "${label}:  - ${_items[$i]}"
-  done
-
-  if [[ "$limit" -lt "$total" ]]; then
-    summary_add "${label}:  - ... plus $((total - limit)) more"
-  fi
-}
-
 # ----------------------------
 # Insights (v2.3.0)
 # ----------------------------
@@ -409,7 +374,6 @@ _run_brew_phase() {
 
   # Contract: run_brew_module <mode> <apply> <backup_dir> <explain> [inventory_index_file]
   run_brew_module "brew-only" "false" "$BACKUP_DIR" "$EXPLAIN" "${inventory_index_file:-}"
-  summary_add "brew: inspected"
 }
 
 _run_launchd_phase() {
@@ -422,19 +386,15 @@ _run_launchd_phase() {
 
   local run_mode="scan"
   local run_apply="false"
-  local summary_verb="inspected"
-
   if [[ "${phase_mode}" != "scan" || "${apply_bool}" == "true" ]]; then
     run_mode="clean"
     run_apply="true"
-    summary_verb="cleaned"
   fi
 
   run_launchd_module "${run_mode}" "${run_apply}" "$BACKUP_DIR" "${inventory_index_file:-}" "${known_apps_file:-}"
-  summary_add "launchd: ${summary_verb} (flagged=${LAUNCHD_FLAGGED_COUNT:-0})"
 
   if [[ "${LAUNCHD_FLAGGED_COUNT:-0}" -gt 0 && -n "${LAUNCHD_FLAGGED_IDS_LIST:-}" ]]; then
-    _summary_add_list "launchd" "${LAUNCHD_FLAGGED_IDS_LIST}" 50
+    summary_add_list "launchd" "${LAUNCHD_FLAGGED_IDS_LIST}" 50
   fi
 }
 
@@ -448,16 +408,12 @@ _run_bins_phase() {
 
   local run_mode="scan"
   local run_apply="false"
-  local summary_verb="inspected"
-
   if [[ "${phase_mode}" != "scan" || "${apply_bool}" == "true" ]]; then
     run_mode="clean"
     run_apply="true"
-    summary_verb="cleaned"
   fi
 
-  run_bins_module "${run_mode}" "${run_apply}" "$BACKUP_DIR" "${inventory_index_file:-}" "${brew_bins_file:-}"
-  summary_add "bins: ${summary_verb}"
+  run_bins_module "${run_mode}" "${run_apply}" "$BACKUP_DIR" "$EXPLAIN" "${inventory_index_file:-}"
 }
 
 _run_caches_phase() {
@@ -469,19 +425,15 @@ _run_caches_phase() {
 
   local run_mode="scan"
   local run_apply="false"
-  local summary_verb="inspected"
-
   if [[ "${phase_mode}" != "scan" || "${apply_bool}" == "true" ]]; then
     run_mode="clean"
     run_apply="true"
-    summary_verb="cleaned"
   fi
 
   run_caches_module "${run_mode}" "${run_apply}" "$BACKUP_DIR" "$EXPLAIN" "${inventory_index_file:-}"
-  summary_add "caches: ${summary_verb} (flagged=${CACHES_FLAGGED_COUNT:-0})"
 
   if [[ "${CACHES_FLAGGED_COUNT:-0}" -gt 0 && -n "${CACHES_FLAGGED_IDS_LIST:-}" ]]; then
-    _summary_add_list "caches" "${CACHES_FLAGGED_IDS_LIST}" 50
+    summary_add_list "caches" "${CACHES_FLAGGED_IDS_LIST}" 50
   fi
 }
 
@@ -491,14 +443,12 @@ _run_logs_phase() {
 
   if [[ "${apply_bool}" != "true" ]]; then
     run_logs_module "false" "$BACKUP_DIR" "$EXPLAIN" "50"
-    summary_add "logs: inspected (flagged=${LOGS_FLAGGED_COUNT:-0} threshold=50MB)"
   else
     run_logs_module "true" "$BACKUP_DIR" "$EXPLAIN" "50"
-    summary_add "logs: cleaned (flagged=${LOGS_FLAGGED_COUNT:-0} threshold=50MB)"
   fi
 
   if [[ "${LOGS_FLAGGED_COUNT:-0}" -gt 0 && -n "${LOGS_FLAGGED_IDS_LIST:-}" ]]; then
-    _summary_add_list "logs" "${LOGS_FLAGGED_IDS_LIST}" 50
+    summary_add_list "logs" "${LOGS_FLAGGED_IDS_LIST}" 50
   fi
 }
 
@@ -508,10 +458,8 @@ _run_permissions_phase() {
 
   if [[ "${apply_bool}" != "true" ]]; then
     run_permissions_module "false" "$BACKUP_DIR" "$EXPLAIN"
-    summary_add "permissions: inspected"
   else
     run_permissions_module "true" "$BACKUP_DIR" "$EXPLAIN"
-    summary_add "permissions: cleaned"
   fi
 }
 
@@ -521,16 +469,12 @@ _run_startup_phase() {
   ensure_inventory
 
   run_startup_module "scan" "false" "$BACKUP_DIR" "$EXPLAIN" "$inventory_index_file"
-  summary_add "startup: inspected=${STARTUP_CHECKED_COUNT:-0} flagged=${STARTUP_FLAGGED_COUNT:-0}"
-  summary_add "startup:   boot: flagged=${STARTUP_BOOT_FLAGGED_COUNT:-0}"
-  summary_add "startup:   login: flagged=${STARTUP_LOGIN_FLAGGED_COUNT:-0}"
-  summary_add "startup:   estimated_risk=${STARTUP_ESTIMATED_RISK:-low}"
 
   if [[ "${STARTUP_FLAGGED_COUNT:-0}" -gt 0 && -n "${STARTUP_FLAGGED_IDS_LIST:-}" ]]; then
-    _summary_add_list "startup" "${STARTUP_FLAGGED_IDS_LIST}"
+    summary_add_list "startup" "${STARTUP_FLAGGED_IDS_LIST}"
   fi
   if [[ "${STARTUP_BOOT_FLAGGED_COUNT:-0}" -gt 0 ]]; then
-    summary_add "risk: startup_items_may_slow_boot"
+    summary_add "risk startup_items_may_slow_boot=true"
   fi
 }
 
@@ -540,10 +484,9 @@ _run_disk_phase() {
   ensure_inventory
 
   run_disk_module "scan" "false" "$BACKUP_DIR" "$EXPLAIN" "$inventory_index_file"
-  summary_add "disk: inspected (flagged=${DISK_FLAGGED_COUNT:-0} total_mb=${DISK_TOTAL_MB:-0} printed=${DISK_PRINTED_COUNT:-0} threshold_mb=${DISK_THRESHOLD_MB:-0})"
 
   if [[ "${DISK_FLAGGED_COUNT:-0}" -gt 0 && -n "${DISK_FLAGGED_IDS_LIST:-}" ]]; then
-    _summary_add_list "disk" "${DISK_FLAGGED_IDS_LIST}" 50
+    summary_add_list "disk" "${DISK_FLAGGED_IDS_LIST}" 50
   fi
 }
 
@@ -555,20 +498,18 @@ _run_leftovers_phase() {
 
   if [[ "${apply_bool}" != "true" ]]; then
     run_leftovers_module "false" "$BACKUP_DIR" "$EXPLAIN" "$installed_bundle_ids_file"
-    summary_add "leftovers: inspected (flagged=${LEFTOVERS_FLAGGED_COUNT:-0} threshold=50MB)"
   else
     run_leftovers_module "true" "$BACKUP_DIR" "$EXPLAIN" "$installed_bundle_ids_file"
-    summary_add "leftovers: cleaned (flagged=${LEFTOVERS_FLAGGED_COUNT:-0} threshold=50MB)"
   fi
 
   if [[ "${LEFTOVERS_FLAGGED_COUNT:-0}" -gt 0 && -n "${LEFTOVERS_FLAGGED_IDS_LIST:-}" ]]; then
-    _summary_add_list "leftovers" "${LEFTOVERS_FLAGGED_IDS_LIST}" 50
+    summary_add_list "leftovers" "${LEFTOVERS_FLAGGED_IDS_LIST}" 50
   fi
 }
 
 _run_intel_phase() {
   run_intel_report
-  summary_add "intel: report written"
+  summary_add "intel report_written=true"
 }
 
 # ----------------------------
@@ -642,7 +583,7 @@ case "$MODE" in
 
   inventory-only)
     ensure_inventory "scan"
-    summary_add "inventory: inspected (ready=${INVENTORY_READY:-false})"
+    summary_add "inventory inspected=true ready=${INVENTORY_READY:-false}"
     ;;
 
   *)
@@ -655,7 +596,7 @@ esac
 # v2.3.0: cross-module correlation insights (scan-only outputs; logging only)
 _emit_disk_service_insights
 
-summary_add "timing: startup=${STARTUP_DUR_S:-0}s launchd=${LAUNCHD_DUR_S:-0}s bins=${BINS_DUR_S:-0}s brew=${BREW_DUR_S:-0}s caches=${CACHES_DUR_S:-0}s intel=${INTEL_DUR_S:-0}s inventory=${INVENTORY_DUR_S:-0}s logs=${LOGS_DUR_S:-0}s disk=${DISK_DUR_S:-0}s leftovers=${LEFTOVERS_DUR_S:-0}s permissions=${PERMISSIONS_DUR_S:-0}s total=$(_elapsed_s "$run_started_s")s"
+summary_add "timing startup_s=${STARTUP_DUR_S:-0} launchd_s=${LAUNCHD_DUR_S:-0} bins_s=${BINS_DUR_S:-0} brew_s=${BREW_DUR_S:-0} caches_s=${CACHES_DUR_S:-0} intel_s=${INTEL_DUR_S:-0} inventory_s=${INVENTORY_DUR_S:-0} logs_s=${LOGS_DUR_S:-0} disk_s=${DISK_DUR_S:-0} leftovers_s=${LEFTOVERS_DUR_S:-0} permissions_s=${PERMISSIONS_DUR_S:-0} total_s=$(_elapsed_s "$run_started_s")"
 summary_print
 log "Done."
 

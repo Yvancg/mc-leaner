@@ -241,6 +241,21 @@ This release deepens startup inspection by answering why a system may feel slow 
 
 Status: **released**
 
+## v2.3.0 (released)
+
+Focus: **summary normalization and safer attribution**
+
+This release standardizes end-of-run summary output and tightens attribution safety without changing the inspection-only posture.
+
+### Cross-module improvements
+
+- Run summary normalized to `module key=value` formatting
+- Shared move contract (`move_attempt`) used consistently by move-capable modules
+- Disk ownership attribution tightened to strict inventory lookups
+- Shared helper utilities reduce duplication (temp files, redaction, attribution)
+
+Status: **released**
+
 ---
 
 ## v2.x (medium term)

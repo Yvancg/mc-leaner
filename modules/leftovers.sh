@@ -66,17 +66,10 @@ _leftovers_summary_emit() {
     return 0
   fi
 
-  if [[ "${LEFTOVERS_FLAGGED_COUNT:-0}" -eq 0 ]]; then
-    summary_add "Leftovers" "No items flagged"
-    return 0
-  fi
+  local flagged_count="${LEFTOVERS_FLAGGED_COUNT:-0}"
+  local move_failures_count="${#LEFTOVERS_MOVE_FAILURES[@]}"
 
-  summary_add "Leftovers" "Flagged: ${LEFTOVERS_FLAGGED_COUNT} item(s)"
-
-  # If we had move failures in apply-mode, surface the count.
-  if [[ "${#LEFTOVERS_MOVE_FAILURES[@]}" -gt 0 ]]; then
-    summary_add "Leftovers" "Move failures: ${#LEFTOVERS_MOVE_FAILURES[@]} (see log for details)"
-  fi
+  summary_add "leftovers" "flagged=${flagged_count} move_failures=${move_failures_count}"
 }
 
 # Treat Apple/system-owned containers as protected. Users should not relocate these.
@@ -261,20 +254,13 @@ run_leftovers_module() {
   local -a _leftovers_tmpfiles
   _leftovers_tmpfiles=()
 
-  _leftovers_tmp_cleanup() {
-    local f
-    for f in "${_leftovers_tmpfiles[@]:-}"; do
-      [[ -n "$f" && -e "$f" ]] && rm -f "$f" 2>/dev/null || true
-    done
-  }
+  _leftovers_tmp_cleanup() { tmpfile_cleanup "${_leftovers_tmpfiles[@]:-}"; }
 
   _leftovers_finish_timing() {
     # SAFETY: must be safe under `set -u` and when invoked on early returns.
     _leftovers_t1="$(/bin/date +%s 2>/dev/null || echo '')"
     if [[ -n "${_leftovers_t0:-}" && -n "${_leftovers_t1:-}" && "${_leftovers_t0}" =~ ^[0-9]+$ && "${_leftovers_t1}" =~ ^[0-9]+$ ]]; then
       LEFTOVERS_DUR_S=$((_leftovers_t1 - _leftovers_t0))
-    else
-      LEFTOVERS_DUR_S=0
     fi
   }
 
@@ -315,7 +301,7 @@ run_leftovers_module() {
   # This keeps leftovers resilient even if mc-leaner.sh only passes inventory_file.
   local inventory_index_tmp=""
   if [[ -z "${inventory_index_file}" || ! -f "${inventory_index_file}" ]]; then
-    inventory_index_tmp="$(mktemp -t mcleaner_inventory_index.XXXXXX)"
+    inventory_index_tmp="$(tmpfile_new "mcleaner_inventory_index")"
     [[ -n "$inventory_index_tmp" ]] && _leftovers_tmpfiles+=("$inventory_index_tmp")
 
     awk -F'\t' '
@@ -353,7 +339,7 @@ run_leftovers_module() {
   # Build a normalized key set from the inventory index for fast installed checks.
   # We store only column 1 (key) as exact-match candidates.
   local installed_index_keys_file
-  installed_index_keys_file="$(mktemp -t mcleaner_installed_index_keys.XXXXXX)"
+  installed_index_keys_file="$(tmpfile_new "mcleaner_installed_index_keys")"
   [[ -n "$installed_index_keys_file" ]] && _leftovers_tmpfiles+=("$installed_index_keys_file")
 
   awk -F'\t' '{print $1}' "${inventory_index_file}" 2>/dev/null | sed '/^$/d' | sort -u > "${installed_index_keys_file}" || true
@@ -457,7 +443,7 @@ _leftovers_scan_target() {
   # Format: one path per line; supports comments (# ...) and blank lines; supports ~ and env vars.
   local allowlist_norm_file=""
   if [[ -n "$allowlist_file" && -f "$allowlist_file" ]]; then
-    allowlist_norm_file="$(mktemp -t mcleaner_leftovers_allowlist.XXXXXX)"
+    allowlist_norm_file="$(tmpfile_new "mcleaner_leftovers_allowlist")"
     while IFS= read -r line || [[ -n "$line" ]]; do
       # Purpose: Strip comments.
       line="${line%%#*}"
@@ -590,7 +576,7 @@ _leftovers_scan_target() {
   done
 
   if [[ -n "$allowlist_norm_file" && -f "$allowlist_norm_file" ]]; then
-    rm -f "$allowlist_norm_file" 2>/dev/null || true
+    tmpfile_cleanup "$allowlist_norm_file"
   fi
 
   [[ "$any_in_target" == "true" ]]

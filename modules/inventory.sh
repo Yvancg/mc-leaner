@@ -91,21 +91,7 @@ _inventory_redact_tmp_path() {
   #   - When EXPLAIN=true: return a redacted form using only the basename, prefixed with ".../".
   #   - Otherwise: return the literal string "redacted".
   # Safety: Logging-only helper.
-  local p="${1:-}"
-  [[ -n "${p}" ]] || { printf '%s' "redacted"; return 0; }
-
-  if [[ "${EXPLAIN:-false}" != "true" ]]; then
-    printf '%s' "redacted"
-    return 0
-  fi
-
-  local b
-  b="$(basename "${p}" 2>/dev/null || printf '%s' "")"
-  if [[ -n "${b}" ]]; then
-    printf '%s' ".../${b}"
-  else
-    printf '%s' ".../mc-leaner_inventory.*"
-  fi
+  redact_path_for_log "${1:-}" "${EXPLAIN:-false}"
 }
 
 #
@@ -115,10 +101,7 @@ _inventory_redact_tmp_path() {
 _inventory_tmpfile() {
   # Purpose: Create a temp file (template first, then fallback).
   local f=""
-  f="$(mktemp -t mc-leaner_inventory.XXXXXX 2>/dev/null || true)"
-  if [[ -z "$f" ]]; then
-    f="$(mktemp 2>/dev/null || true)"
-  fi
+  f="$(tmpfile_new "mc-leaner.inventory")"
   echo "$f"
 }
 
@@ -497,14 +480,10 @@ _inventory_build_brew_bins() {
   fi
 
   local tmp=""
-  tmp="$(mktemp -t mc-leaner_inventory_brew_bins.XXXXXX 2>/dev/null || true)"
-  if [[ -z "$tmp" ]]; then
-    tmp="$(mktemp 2>/dev/null || true)"
-  fi
+  tmp="$(tmpfile_new "mc-leaner.inventory.brew_bins")"
   if [[ -z "$tmp" || ! -e "$tmp" ]]; then
     return 0
   fi
-  : > "$tmp"
 
   local d
   for d in "$prefix/bin" "$prefix/sbin"; do
@@ -523,32 +502,29 @@ _inventory_build_brew_bins() {
   local rows
   rows="$(awk 'END{print NR+0}' "$tmp" 2>/dev/null || echo 0)"
   if [[ "$rows" -le 0 ]]; then
-    rm -f "$tmp" 2>/dev/null || true
+    tmpfile_cleanup "$tmp"
     return 0
   fi
 
   # Sort unique, locale-stable.
   local out=""
-  out="$(mktemp -t mc-leaner_inventory_brew_bins.XXXXXX 2>/dev/null || true)"
-  if [[ -z "$out" ]]; then
-    out="$(mktemp 2>/dev/null || true)"
-  fi
+  out="$(tmpfile_new "mc-leaner.inventory.brew_bins")"
   if [[ -z "$out" || ! -e "$out" ]]; then
-    rm -f "$tmp" 2>/dev/null || true
+    tmpfile_cleanup "$tmp"
     return 0
   fi
 
   if ! LC_ALL=C sort -u "$tmp" > "$out" 2>/dev/null; then
-    rm -f "$tmp" "$out" 2>/dev/null || true
+    tmpfile_cleanup "$tmp" "$out"
     return 0
   fi
 
-  rm -f "$tmp" 2>/dev/null || true
+  tmpfile_cleanup "$tmp"
 
   local final_rows
   final_rows="$(awk 'END{print NR+0}' "$out" 2>/dev/null || echo 0)"
   if [[ "$final_rows" -le 0 ]]; then
-    rm -f "$out" 2>/dev/null || true
+    tmpfile_cleanup "$out"
     return 0
   fi
 
@@ -713,7 +689,7 @@ inventory_lookup() {
     local hit_name hit_source hit_path
     IFS=$'\t' read -r hit_name hit_source hit_path <<< "$line"
     hit_name="$(inventory_normalize_owner_name "$hit_name" "$key" "$hit_path" 2>/dev/null || printf '%s' "$hit_name")"
-    line="${hit_name}$'\t'${hit_source}$'\t'${hit_path}"
+    line="${hit_name}"$'\t'"${hit_source}"$'\t'"${hit_path}"
   fi
 
   if [[ "$INVENTORY_CACHE_READY" == "true" ]]; then

@@ -31,6 +31,16 @@ if ! type tmpfile >/dev/null 2>&1; then
   }
 fi
 
+if ! type tmpfile_cleanup >/dev/null 2>&1; then
+  tmpfile_cleanup() {
+    # Purpose: best-effort temp cleanup when run standalone.
+    local f
+    for f in "$@"; do
+      [[ -n "$f" && -e "$f" ]] && rm -f "$f" 2>/dev/null || true
+    done
+  }
+fi
+
 # ----------------------------
 # Helpers
 # ----------------------------
@@ -187,28 +197,25 @@ _logs_confirm_move() {
 
 _logs_move_to_backup() {
   # Purpose: move a path to backup safely (best-effort)
-  # Notes: uses safe_move from fs.sh; contract: see shared move/error contract
+  # Notes: uses move_attempt from fs.sh; contract: see shared move/error contract
   local p="$1"
   local backup_dir="$2"
 
   # Defensive: require shared move helper
-  if ! type safe_move >/dev/null 2>&1; then
+  if ! type move_attempt >/dev/null 2>&1; then
     log "Logs: SKIP (move helper missing): $p"
     return 1
   fi
 
   mkdir -p "$backup_dir"
 
-  # safe_move is the source of truth for destination selection and errors
-  local out
-  out="$(safe_move "$p" "$backup_dir" 2>&1)" || {
+  if ! move_attempt "$p" "$backup_dir"; then
     # IMPORTANT: do not log here; caller aggregates failures
-    printf '%s\n' "$out"
+    printf '%s\n' "${MOVE_LAST_MESSAGE:-failed}"
     return 1
-  }
+  fi
 
-  # On success, safe_move returns the destination path on stdout
-  log "Moved: $p -> $out"
+  log "Moved: $p -> ${MOVE_LAST_DEST:-}"
   return 0
 }
 
@@ -259,17 +266,10 @@ run_logs_module() {
     # Guard arithmetic in strict mode: only compute if both are integers.
     if [[ "${_logs_t0:-}" =~ ^[0-9]+$ && "${_logs_t1:-}" =~ ^[0-9]+$ ]]; then
       LOGS_DUR_S=$((_logs_t1 - _logs_t0))
-    else
-      LOGS_DUR_S=0
     fi
   }
 
-  _logs_tmp_cleanup() {
-    local f
-    for f in "${_logs_tmpfiles[@]:-}"; do
-      [[ -n "${f}" && -e "${f}" ]] && rm -f "${f}" 2>/dev/null || true
-    done
-  }
+  _logs_tmp_cleanup() { tmpfile_cleanup "${_logs_tmpfiles[@]:-}"; }
 
   _logs_on_return() {
     _logs_finish_timing

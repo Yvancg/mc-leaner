@@ -37,7 +37,7 @@ If you want to understand what is happening on your system and clean it safely, 
 
 ---
 
-## What mc-leaner does (v2.2.0)
+## What mc-leaner does (v2.3.0)
 
 mc-leaner inspects macOS systems for:
 

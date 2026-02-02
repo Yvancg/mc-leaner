@@ -294,50 +294,27 @@ _startup_inventory_owner() {
     return 0
   fi
 
-  local owner=""
-
-  if declare -F inventory_lookup_owner_by_bundle_id >/dev/null 2>&1; then
-    owner="$(inventory_lookup_owner_by_bundle_id "${label}" 2>/dev/null || true)"
-    if [[ -n "${owner}" ]]; then
-      { printf '%s\n' "${owner}|bundle-id|high"; } 2>/dev/null || true
-      return 0
-    fi
+  local meta=""
+  if declare -F inventory_owner_lookup_meta >/dev/null 2>&1; then
+    meta="$(inventory_owner_lookup_meta "${label}" "${exec_path}" "${INVENTORY_INDEX_FILE:-}" 2>/dev/null || true)"
   fi
 
-  if declare -F inventory_lookup_owner_by_path >/dev/null 2>&1 && [[ -n "${exec_path}" ]]; then
-    owner="$(inventory_lookup_owner_by_path "${exec_path}" 2>/dev/null || true)"
-    if [[ -n "${owner}" ]]; then
-      { printf '%s\n' "${owner}|path|high"; } 2>/dev/null || true
-      return 0
-    fi
-  fi
-
-  if declare -F inventory_lookup_owner_by_name >/dev/null 2>&1; then
-    owner="$(inventory_lookup_owner_by_name "${label}" 2>/dev/null || true)"
-    if [[ -n "${owner}" ]]; then
-      { printf '%s\n' "${owner}|name|medium"; } 2>/dev/null || true
+  if [[ -n "$meta" ]]; then
+    local owner="" how="" conf=""
+    owner="${meta%%$'\t'*}"
+    how="${meta#*$'\t'}"; how="${how%%$'\t'*}"
+    conf="${meta##*$'\t'}"
+    if [[ -n "$owner" && "$owner" != "Unknown" ]]; then
+      { printf '%s\n' "${owner}|${how}|${conf}"; } 2>/dev/null || true
       return 0
     fi
   fi
 
   if declare -F inventory_lookup_brew_service_owner >/dev/null 2>&1; then
-    owner="$(inventory_lookup_brew_service_owner "${label}" 2>/dev/null || true)"
-    if [[ -n "${owner}" ]]; then
-      { printf '%s\n' "Homebrew (${owner})|brew-service|medium"; } 2>/dev/null || true
-      return 0
-    fi
-  fi
-
-  # Generic fallback: match launchd label prefixes against installed bundle IDs in the inventory index.
-  if declare -F inventory_owner_by_label_prefix >/dev/null 2>&1; then
-    local prefix_meta=""
-    prefix_meta="$(inventory_owner_by_label_prefix "${label}" "${INVENTORY_INDEX_FILE:-}" 2>/dev/null || true)"
-    if [[ -n "${prefix_meta}" ]]; then
-      local p_owner="" p_how="" p_conf=""
-      p_owner="${prefix_meta%%$'\t'*}"
-      p_how="${prefix_meta#*$'\t'}"; p_how="${p_how%%$'\t'*}"
-      p_conf="${prefix_meta##*$'\t'}"
-      { printf '%s\n' "${p_owner}|${p_how}|${p_conf}"; } 2>/dev/null || true
+    local brew_owner=""
+    brew_owner="$(inventory_lookup_brew_service_owner "${label}" 2>/dev/null || true)"
+    if [[ -n "${brew_owner}" ]]; then
+      { printf '%s\n' "Homebrew (${brew_owner})|brew-service|medium"; } 2>/dev/null || true
       return 0
     fi
   fi
@@ -661,14 +638,11 @@ run_startup_module() {
   # Inputs
   local inventory_label="<none>"
   if [[ -n "${inventory_index}" ]]; then
-    if [[ "${explain}" == "true" ]]; then
-      inventory_label=".../$(basename "${inventory_index}")"
-    else
-      inventory_label="redacted"
-    fi
+    inventory_label="$(redact_path_for_log "${inventory_index}" "${explain}")"
   fi
 
-  log "Startup: mode=${mode} apply=${apply} backup_dir=${backup_dir} explain=${explain} inventory_index=${inventory_label}"
+  local include_system="${STARTUP_INCLUDE_SYSTEM:-false}"
+  log "Startup: mode=${mode} apply=${apply} backup_dir=${backup_dir} explain=${explain} system=${include_system} inventory_index=${inventory_label}"
 
   # Explain flag used throughout via EXPLAIN.
   local _startup_prev_explain="${EXPLAIN:-false}"
@@ -680,6 +654,7 @@ run_startup_module() {
   if [[ "${explain}" != "true" ]]; then
     explain_system="false"
   fi
+  STARTUP_INCLUDE_SYSTEM="${explain_system}"
 
   : "${mode}" "${backup_dir}" # reserved for contract consistency
 
@@ -748,10 +723,14 @@ run_startup_module() {
   _startup_explain "${explain}" "Startup: scanning launchd + login items"
 
   _startup_scan_launchd_dir "${explain}" "${explain_system}" "${HOME}/Library/LaunchAgents" "LaunchAgent"
-  _startup_scan_launchd_dir "${explain}" "${explain_system}" "/Library/LaunchAgents" "LaunchAgent"
 
-  _startup_scan_launchd_dir "${explain}" "${explain_system}" "/Library/LaunchDaemons" "LaunchDaemon"
-  _startup_scan_launchd_dir "${explain}" "${explain_system}" "/System/Library/LaunchDaemons" "LaunchDaemon"
+  if [[ "${include_system}" == "true" ]]; then
+    _startup_scan_launchd_dir "${explain}" "${explain_system}" "/Library/LaunchAgents" "LaunchAgent"
+    _startup_scan_launchd_dir "${explain}" "${explain_system}" "/Library/LaunchDaemons" "LaunchDaemon"
+    _startup_scan_launchd_dir "${explain}" "${explain_system}" "/System/Library/LaunchDaemons" "LaunchDaemon"
+  else
+    _startup_explain "${explain}" "Startup: system launchd scan disabled (use --startup-system to include)"
+  fi
 
   _startup_scan_login_items "${explain}"
 
@@ -779,6 +758,8 @@ run_startup_module() {
   STARTUP_SURFACE_BREAKDOWN="${STARTUP_SURFACE}"
 
   log "Startup: inspected ${STARTUP_CHECKED} item(s); flagged ${STARTUP_FLAGGED} (unknown owner ${STARTUP_UNKNOWN})"
+
+  summary_add "startup" "inspected=${STARTUP_CHECKED} flagged=${STARTUP_FLAGGED} unknown=${STARTUP_UNKNOWN} boot_flagged=${STARTUP_BOOT_FLAGGED} login_flagged=${STARTUP_LOGIN_FLAGGED} estimated_risk=${STARTUP_ESTIMATED_RISK} system_included=${STARTUP_INCLUDE_SYSTEM:-false}"
 }
 
 # End of module

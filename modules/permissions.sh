@@ -213,8 +213,6 @@ run_permissions_module() {
     _permissions_t1="$(/bin/date +%s 2>/dev/null || echo '')"
     if [[ -n "${_permissions_t0:-}" && -n "${_permissions_t1:-}" && "${_permissions_t0}" =~ ^[0-9]+$ && "${_permissions_t1}" =~ ^[0-9]+$ ]]; then
       PERMISSIONS_DUR_S=$((_permissions_t1 - _permissions_t0))
-    else
-      PERMISSIONS_DUR_S=0
     fi
   }
 
@@ -338,7 +336,7 @@ run_permissions_module() {
   fi
 
   # Summary line (Module Output Contract)
-  summary_add "permissions: interactive=$interactive host=$host_app gui_prompt=$gui_prompt tcc_blocks=$tcc_blocks"
+  summary_add "permissions" "interactive=${interactive} host=${host_app} gui_prompt=${gui_prompt} tcc_blocks=${tcc_blocks}"
 
   log "Permissions: inspection complete."
 }

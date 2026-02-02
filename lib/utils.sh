@@ -57,6 +57,71 @@ tmpfile() {
   printf '%s' "${p}"
 }
 
+tmpfile_new() {
+  # Purpose: create a unique temp file path with a custom prefix.
+  # Usage: tmpfile_new [prefix]
+  # Safety: returns empty string on failure. Does not log.
+  local prefix="${1:-mc-leaner}"
+  local base="${TMPDIR:-/tmp}"
+  local p=""
+  p="$(/usr/bin/mktemp "${base%/}/${prefix}.XXXXXX" 2>/dev/null)" || { echo ""; return 0; }
+  : > "${p}" 2>/dev/null || true
+  printf '%s' "${p}"
+}
+
+tmpfile_cleanup() {
+  # Purpose: remove temp files if they exist.
+  # Usage: tmpfile_cleanup <file> [file...]
+  # Safety: best-effort cleanup; ignores errors.
+  local f
+  for f in "$@"; do
+    [[ -n "$f" && -e "$f" ]] && rm -f "$f" 2>/dev/null || true
+  done
+}
+
+# ----------------------------
+# Explain override
+# ----------------------------
+with_explain() {
+  # Purpose: run a command with a temporary EXPLAIN value.
+  # Usage: with_explain <true|false> <command> [args...]
+  # Safety: restores previous EXPLAIN value after the command.
+  local explain_val="${1:-false}"
+  shift || true
+
+  local prev_explain="${EXPLAIN:-false}"
+  EXPLAIN="${explain_val}"
+  "$@"
+  local rc=$?
+  EXPLAIN="${prev_explain}"
+  return $rc
+}
+
+# ----------------------------
+# Log redaction helpers
+# ----------------------------
+redact_path_for_log() {
+  # Purpose: avoid leaking full paths in non-explain output.
+  # Behavior:
+  #   - explain=true  -> ".../<basename>"
+  #   - explain=false -> "redacted"
+  local p="${1:-}"
+  local explain="${2:-${EXPLAIN:-false}}"
+
+  [[ -n "${p}" ]] || { printf '%s' "<none>"; return 0; }
+
+  if [[ "${explain}" == "true" ]]; then
+    local b=""
+    b="$(basename "${p}" 2>/dev/null || printf '%s' '')"
+    if [[ -n "${b}" ]]; then
+      printf '%s' ".../${b}"
+      return 0
+    fi
+  fi
+
+  printf '%s' "redacted"
+}
+
 # ----------------------------
 # Background services (v2.3.0 contract)
 # ----------------------------
@@ -127,6 +192,61 @@ inventory_owner_by_label_prefix() {
   done
 
   return 1
+}
+
+# ----------------------------
+# Inventory-backed ownership helpers
+# ----------------------------
+# Purpose: provide a shared, conservative owner attribution helper.
+# Safety: inspection-only; reads inventory data only when available.
+
+inventory_owner_lookup_meta() {
+  # Contract:
+  #   inventory_owner_lookup_meta <label> [exec_path] [inventory_index_file]
+  # Output:
+  #   <owner>\t<how>\t<confidence>
+  # Notes:
+  #   - Returns "Unknown\tnone\tlow" when no inventory-backed match is found.
+  local label="${1:-}"
+  local exec_path="${2:-}"
+  local inventory_index_file="${3:-${INVENTORY_INDEX_FILE:-}}"
+
+  local owner=""
+
+  if [[ -n "$label" ]] && declare -F inventory_lookup_owner_by_bundle_id >/dev/null 2>&1; then
+    owner="$(inventory_lookup_owner_by_bundle_id "${label}" 2>/dev/null || true)"
+    if [[ -n "$owner" ]]; then
+      printf '%s\t%s\t%s\n' "$owner" "bundle-id" "high"
+      return 0
+    fi
+  fi
+
+  if [[ -n "$exec_path" ]] && declare -F inventory_lookup_owner_by_path >/dev/null 2>&1; then
+    owner="$(inventory_lookup_owner_by_path "${exec_path}" 2>/dev/null || true)"
+    if [[ -n "$owner" ]]; then
+      printf '%s\t%s\t%s\n' "$owner" "path" "high"
+      return 0
+    fi
+  fi
+
+  if [[ -n "$label" ]] && declare -F inventory_lookup_owner_by_name >/dev/null 2>&1; then
+    owner="$(inventory_lookup_owner_by_name "${label}" 2>/dev/null || true)"
+    if [[ -n "$owner" ]]; then
+      printf '%s\t%s\t%s\n' "$owner" "name" "medium"
+      return 0
+    fi
+  fi
+
+  if [[ -n "$label" ]] && declare -F inventory_owner_by_label_prefix >/dev/null 2>&1; then
+    local prefix_meta=""
+    prefix_meta="$(inventory_owner_by_label_prefix "${label}" "${inventory_index_file}" 2>/dev/null || true)"
+    if [[ -n "$prefix_meta" ]]; then
+      printf '%s\n' "$prefix_meta"
+      return 0
+    fi
+  fi
+
+  printf '%s\t%s\t%s\n' "Unknown" "none" "low"
 }
 
 # ----------------------------
@@ -425,6 +545,41 @@ summary_add() {
   SUMMARY_LINES+=("$*")
 }
 
+summary_add_list() {
+  # Usage: summary_add_list <label> <newline_delimited_items> [max_items]
+  # Purpose: append a compact list of items to the run summary.
+  # Safety: logging only
+  local label="$1"
+  local items_nl="${2:-}"
+  local max_items="${3:-0}"
+
+  [[ -n "$items_nl" ]] || return 0
+
+  local -a _items
+  while IFS= read -r _line; do
+    [[ -n "${_line}" ]] && _items+=("${_line}")
+  done <<< "$items_nl"
+
+  local total="${#_items[@]}"
+  [[ "$total" -gt 0 ]] || return 0
+
+  summary_add "${label}: flagged_items (${total})"
+
+  local i
+  local limit="$total"
+  if [[ "$max_items" =~ ^[0-9]+$ && "$max_items" -gt 0 && "$max_items" -lt "$total" ]]; then
+    limit="$max_items"
+  fi
+
+  for ((i=0; i<limit; i++)); do
+    summary_add "${label}:  - ${_items[$i]}"
+  done
+
+  if [[ "$limit" -lt "$total" ]]; then
+    summary_add "${label}:  - ... plus $((total - limit)) more"
+  fi
+}
+
 summary_add_module_line() {
   # Usage: summary_add_module_line "caches scanned_dirs=88 total_mb=599 | flagged=1 | moved=no"
   # Purpose: register a single, parseable module line for the consolidated summary
@@ -485,7 +640,7 @@ summary__append_set_lines() {
     module="${full%%.*}"
     local seen="false"
     local m
-    for m in "${modules[@]}"; do
+    for m in "${modules[@]:-}"; do
       if [[ "$m" == "$module" ]]; then
         seen="true"
         break
@@ -497,7 +652,7 @@ summary__append_set_lines() {
   done
 
   local line
-  for module in "${modules[@]}"; do
+  for module in "${modules[@]:-}"; do
     line="${module}:"
     for i in "${!SUMMARY_SET_KEYS[@]}"; do
       full="${SUMMARY_SET_KEYS[i]}"

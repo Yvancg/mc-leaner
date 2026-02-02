@@ -1,8 +1,8 @@
 #!/bin/bash
-# shellcheck shell=bash
 # mc-leaner: caches inspection module
 # Purpose: Inspect user-level cache locations and surface large cache directories for review
 # Safety: User-level only; defaults to dry-run; never deletes; cleanup relocates caches to backups with confirmation
+# shellcheck shell=bash
 
 # NOTE: Modules run with strict mode for deterministic failures and auditability.
 

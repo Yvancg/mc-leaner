@@ -1,30 +1,40 @@
 #!/bin/bash
-# shellcheck shell=bash
 # mc-leaner: leftovers module (inspection-first)
-#
 # Purpose: Identify user-level application leftovers for apps that no longer appear installed.
 # Safety: Inspection-first; never deletes; relocation only in apply-mode with confirmation.
-#
+# shellcheck shell=bash
+
+# ----------------------------
 # Contract
+# ----------------------------
 # - Entry point: run_leftovers_module <apply> <backup_dir> [explain] [inventory_file] [inventory_index_file]
 # - Prefer false negatives over false positives.
 #
-# Inputs: apply, backup_dir, explain, inventory_file, inventory_index_file
+# ----------------------------
+# Inputs
+# ----------------------------
+# apply, backup_dir, explain, inventory_file, inventory_index_file
 #
+# ----------------------------
 # Outputs (exported globals)
+# ----------------------------
 # - LEFTOVERS_FLAGGED_COUNT: number of LEFTOVER? findings emitted
 # - LEFTOVERS_FLAGGED_ITEMS: array of pre-formatted summary lines
 # - LEFTOVERS_MOVE_FAILURES: array of pre-formatted move failure lines (apply-mode)
 # - LEFTOVERS_DUR_S: best-effort wall clock duration in seconds for this module
 #
+# ----------------------------
 # Scope (user-level only)
+# ----------------------------
 # - ~/Library/Application Support
 # - ~/Library/Containers
 # - ~/Library/Group Containers
 # - ~/Library/Saved Application State
 # - ~/Library/Preferences (report-only by default; no moves)
 #
+# ----------------------------
 # Notes
+# ----------------------------
 # - Owner/app inference is heuristic-based.
 # - Apple/system-owned containers are treated as protected and skipped.
 # - inventory_index_file is optional; a fallback index is built when missing.

@@ -20,6 +20,11 @@ This project follows a pragmatic versioning scheme:
 - Shared helper utilities
   - Centralized temp file creation/cleanup and path redaction helpers
   - Inventory-backed owner lookup helper for consistent attribution
+- Background service privacy records
+  - `SERVICE?` records for correlation
+  - network-facing classification (explicit, conservative heuristics)
+- Startup system scan opt-in (`--startup-system`)
+  - default startup scan is user scope only
 
 ### Changed
 
@@ -32,11 +37,18 @@ This project follows a pragmatic versioning scheme:
   - Consistent failure classification and messaging
 
 - Disk ownership attribution
-  - Tightened inventory matching to strict index lookups (reduced false positives)
+  - Inventory-first matching with conservative heuristics when inventory is missing
+- Inventory index path redaction
+  - Consistent basename-only display under `--explain`, redacted otherwise
+- Launchd summary clarity
+  - `plists_checked` surfaced alongside flagged counts
+- Timing stability
+  - Per-module durations survive RETURN traps under strict shell
 
 ### Fixed
 
 - Argument alignment for the bins module in the CLI dispatcher
+- Owner attribution output sanitization (tab/newline escape safety)
 
 # ## v2.2.0 — Startup impact analysis, timing fixes, and module contract alignment
 

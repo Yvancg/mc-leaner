@@ -21,7 +21,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/*.sh
 source "$ROOT_DIR/lib/utils.sh"
 
-# Logging contract:
+# ----------------------------
+# Logging Contract
+# ----------------------------
 # - stdout is reserved for machine-readable records
 # - human logs go to stderr
 # `lib/utils.sh` is the single source of truth for ts/log helpers.

@@ -72,6 +72,7 @@ mc-leaner flags items for **review**, not removal. If you still use an app, keep
 As of v2.2.0, mc-leaner always lists the identifiers of all flagged items in the end-of-run summary.
 
 As of v2.3.0, summary lines are normalized to a stable `module key=value` format for easier parsing and audits.
+Launchd summary lines also include `plists_checked` to avoid confusion with service record counts.
 
 This is intentional.
 

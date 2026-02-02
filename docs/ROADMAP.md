@@ -246,6 +246,7 @@ Status: **released**
 Focus: **summary normalization and safer attribution**
 
 This release standardizes end-of-run summary output and tightens attribution safety without changing the inspection-only posture.
+Summary: summary normalization, move contract unification, safer attribution, privacy records, and startup system opt-in.
 
 ### Cross-module improvements
 
@@ -253,46 +254,15 @@ This release standardizes end-of-run summary output and tightens attribution saf
 - Shared move contract (`move_attempt`) used consistently by move-capable modules
 - Disk ownership attribution tightened to strict inventory lookups
 - Shared helper utilities reduce duplication (temp files, redaction, attribution)
+- Owner attribution output sanitized to prevent stray tab escape sequences in logs
+- Inventory index paths consistently redacted in module logs (basename only in explain)
+- Launchd summary clarified with `plists_checked` to avoid service/plist count confusion
+- Startup scan defaulted to user scope; system launchd items require explicit opt-in
+- Per-module timing stabilized so durations survive RETURN traps
 
 Status: **released**
 
 ---
-
-## v2.x (medium term)
-
-Focus: **system intelligence and cross-module correlation**
-
-v2.x deepens mc-leaner’s inspection capabilities by connecting signals across modules.
-This phase remains strictly CLI-first and inspection-only.
-
-### Planned modules
-
-#### Disk usage attribution (extended)
-
-- Build on the v2.1.0 disk inspection module
-- Correlate disk usage across caches, logs, leftovers, binaries, and Homebrew assets
-- Attribute disk usage more precisely by app bundle ID and toolchain
-- Explain mode showing cross-module attribution logic
-
-#### Binary provenance & trust metadata
-
-- Inspect executable signing status
-- Surface notarization and Team ID when available
-- Distinguish system, vendor, and user-built binaries
-- No judgments or enforcement, visibility only
-
-#### Environment pollution (developer-focused)
-
-- Inspect PATH ordering and shadowed binaries
-- Detect duplicate tools across multiple locations
-- Show which binary is actually executed for common commands
-- Explain mode for resolution logic
-
-#### Cross-module explain engine
-
-- Generate narrative explanations across modules
-- Answer “why this exists” and “what caused this”
-- Serve as the foundation for future UI layers
 
 ## v3.0 (long term)
 

@@ -1,12 +1,15 @@
 #!/bin/bash
-# shellcheck shell=bash
 # mc-leaner: permissions & environment diagnostics
 # Purpose: explain why some paths cannot be inspected/moved (TCC, SIP, non-interactive shell)
 # Safety: inspection-only; no file moves, no privilege escalation, no destructive operations
+# shellcheck shell=bash
 
 # NOTE: Modules run with strict mode for deterministic failures and auditability.
 set -euo pipefail
 
+# ----------------------------
+# Expected Globals
+# ----------------------------
 # Expected globals (provided by entrypoint):
 #   APPLY (true/false)
 #   EXPLAIN (true/false)

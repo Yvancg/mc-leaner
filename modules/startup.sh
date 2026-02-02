@@ -1,8 +1,9 @@
 #!/bin/bash
-# shellcheck shell=bash
 # mc-leaner: startup
 # Purpose: Inspect macOS startup execution surfaces (launchd + login items) for visibility.
 # Safety: Inspection-only (never modifies system state). In clean/apply mode, it still only scans.
+# shellcheck shell=bash
+
 # NOTE: Modules run with strict mode for deterministic failures and auditability.
 
 # Strict mode: avoid `set -e` in inspection modules (best-effort scanning).
@@ -12,7 +13,11 @@ set -uo pipefail
 # Safety: logging/output ergonomics only; does not affect inspection results.
 trap '' PIPE
 
-# Contract: run_startup_module <mode> <apply> <backup_dir> <explain> [inventory_index]
+
+# ----------------------------
+# Module Contract
+# ----------------------------
+# run_startup_module <mode> <apply> <backup_dir> <explain> [inventory_index]
 # Note: Kept near the top so simple greps and partial prints (e.g., `sed -n '1,260p'`) will find it.
 
 # ----------------------------

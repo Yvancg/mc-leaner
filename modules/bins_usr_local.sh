@@ -1,9 +1,8 @@
 #!/bin/bash
-# shellcheck shell=bash
 # mc-leaner: /usr/local/bin inspection module
 # Purpose: Heuristically identify unmanaged binaries in /usr/local/bin (using Inventory to reduce false positives) and optionally relocate them to backups
 # Safety: Defaults to dry-run; never deletes; moves require explicit `--apply` and per-item confirmation
-
+# shellcheck shell=bash
 
 # NOTE: Modules run with strict mode for deterministic failures and auditability.
 set -uo pipefail

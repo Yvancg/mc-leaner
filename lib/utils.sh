@@ -17,8 +17,6 @@ ts() {
 # Purpose: Emit a single log line with timestamp prefix.
 # Safety: Logging only.
 log() {
-  # Purpose: Emit a single log line with timestamp prefix.
-  # Safety: Logging only. Always stderr. Ignore EPIPE.
   local _ts=""
   _ts="$(ts)"
   printf '[%s] %s\n' "${_ts}" "$*" >&2 2>/dev/null || true
@@ -352,7 +350,6 @@ service_network_facing_classify() {
   local owner="${1:-Unknown}"
   local label="${2:-}"
 
-  # Owner-first: if we have a known owner, prefer explicit owner-class rules.
   if [[ -n "$owner" && "$owner" != "Unknown" ]]; then
     if _service_owner_in_list "$owner" "${NF_VPN_OWNERS[@]:-}"; then
       printf 'true\tNF_VPN_OWNER\tvpn_vendor_match'

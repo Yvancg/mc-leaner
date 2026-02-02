@@ -1,9 +1,8 @@
 #!/bin/bash
-# shellcheck shell=bash
 # mc-leaner: logs module (inspection-first)
 # Purpose: identify large log files and log directories (user + system)
 # Safety: dry-run by default; optional move-to-backup when --apply is used
-
+# shellcheck shell=bash
 
 # NOTE: Modules run with strict mode for deterministic failures and auditability.
 set -euo pipefail

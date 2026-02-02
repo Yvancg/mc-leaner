@@ -42,13 +42,14 @@ If you want to understand what is happening on your system and clean it safely, 
 mc-leaner inspects macOS systems for:
 
 - Startup and login items (launchd agents, daemons, login items)
-Startup inspection does not disable anything.
+Startup inspection does not disable anything, and system launchd items are opt-in.
 - Orphaned or unmanaged launchd plists
 - Large caches and logs
 - Leftover data from uninstalled applications
 - Large disk consumers with ownership attribution
 - Intel-only executables on Apple Silicon (reporting only)
 - Execution context and permission boundaries
+- Background service visibility records (`SERVICE?`) for correlation
 
 All modules are **inspection-only by default**.  
 Cleanup actions require `--apply` and explicit confirmation.

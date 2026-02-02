@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# shellcheck shell=bash
-
 # mc-leaner: disk
 # Purpose: Attribute top disk consumers across common locations (Application Support, caches, logs, containers, toolchains).
 # Safety: Inspection-only. No deletes, no moves. --apply is ignored.
-#
+# shellcheck shell=bash
+
+# ----------------------------
 # Contract (disk.sh -> mc-leaner.sh)
+# ----------------------------
 #   - Exports:
 #       - run_disk_module
 #       - DISK_CHECKED_COUNT (int) : number of candidate items inspected (directories evaluated)
@@ -28,7 +29,9 @@
 #   - Exit codes:
 #       - 0 on success; non-zero only on unexpected runtime failure.
 #
-# Attribution confidence (conf)
+# ----------------------------
+# Attribution Confidence (conf)
+# ----------------------------
 #   - high:
 #       - Matched against inventory index (apps/Homebrew), OR
 #       - Recognized toolchain/dev roots (Homebrew, npm/pnpm/yarn, cargo, pip cache, gradle, m2, Xcode)

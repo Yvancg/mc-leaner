@@ -20,7 +20,7 @@ This project follows a pragmatic versioning scheme:
 - Shared helper utilities
   - Centralized temp file creation/cleanup and path redaction helpers
   - Inventory-backed owner lookup helper for consistent attribution
-- Background service privacy records
+- Background service visibility records
   - `SERVICE?` records for correlation
   - network-facing classification (explicit, conservative heuristics)
 - Startup system scan opt-in (`--startup-system`)

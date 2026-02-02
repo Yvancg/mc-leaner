@@ -246,7 +246,7 @@ Status: **released**
 Focus: **summary normalization and safer attribution**
 
 This release standardizes end-of-run summary output and tightens attribution safety without changing the inspection-only posture.
-Summary: summary normalization, move contract unification, safer attribution, privacy records, and startup system opt-in.
+Summary: summary normalization, move contract unification, safer attribution, service visibility records, and startup system opt-in.
 
 ### Cross-module improvements
 

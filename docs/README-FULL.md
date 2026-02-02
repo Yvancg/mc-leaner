@@ -74,7 +74,7 @@ As of v2.3.0, all modules follow a strict inspection-first contract, share a uni
 - Move-capable modules use the shared `move_attempt` contract for consistent failure reporting
 - Disk ownership attribution is inventory-first with conservative heuristics
 - Shared helper utilities reduce per-module duplication (temp files, redaction, attribution)
-- Background service privacy records (`SERVICE?`) with conservative network-facing classification
+- Background service visibility records (`SERVICE?`) with conservative network-facing classification
 - Startup scan defaults to user scope; system launchd requires `--startup-system`
 - Inventory index paths are consistently redacted in module logs
 - Per-module timing is stabilized under strict shell

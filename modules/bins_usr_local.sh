@@ -61,14 +61,15 @@ run_bins_module() {
   : "${mode}" "${backup_dir}" "${explain}"
 
   # Inputs
+  # Export contract fields for run summary consumption (stable even when empty).
+  BINS_CHECKED_COUNT="0"
+  BINS_FLAGGED_IDS_LIST=""
+  BINS_FLAGGED_COUNT="0"
+
   log "Bins: mode=${mode} apply=${apply} backup_dir=${backup_dir} explain=${explain} inventory_index=$(_bins_log_path "${inventory_index_file:-}" "${explain}")"
   if [[ "${explain}" == "true" ]]; then
     explain_log "Bins (explain): scanning /usr/local/bin"
   fi
-
-  # Export flagged identifiers list for run summary consumption (stable contract even when empty).
-  BINS_FLAGGED_IDS_LIST=""
-  BINS_FLAGGED_COUNT="0"
 
   # Module timing (seconds). Used by the end-of-run timing summary.
   local _bins_t0=""
@@ -81,7 +82,12 @@ run_bins_module() {
   # ----------------------------
   local dir="/usr/local/bin"
   if [[ ! -d "$dir" ]]; then
-    log "Skipping $dir (not present)."
+    BINS_CHECKED_COUNT="0"
+    BINS_FLAGGED_IDS_LIST=""
+    BINS_FLAGGED_COUNT="0"
+    BINS_DUR_S="${BINS_DUR_S:-0}"
+    log "Bins: skipping ${dir} (not present)."
+    summary_add "bins" "flagged=0"
     return 0
   fi
 
@@ -223,6 +229,7 @@ run_bins_module() {
     [[ -x "$bin_path" ]] || continue
     local base
     base="$(basename "$bin_path")"
+    BINS_CHECKED_COUNT=$((BINS_CHECKED_COUNT + 1))
 
     # Skip symlinks that resolve to an existing target (common for editor CLIs like `code`)
     # Purpose: avoid flagging valid shims as orphans when they point into an installed app bundle
@@ -232,7 +239,9 @@ run_bins_module() {
 
       # If the symlink resolves to an existing target, treat it as managed and skip.
       if [[ -n "$resolved" && -e "$resolved" ]]; then
-        log "SKIP (symlink target exists): $bin_path -> $resolved"
+        if [[ "${explain}" == "true" ]]; then
+          explain_log "Bins: skip symlink target exists: bin=${bin_path} target=${resolved}"
+        fi
         continue
       fi
     fi
@@ -257,7 +266,9 @@ run_bins_module() {
 
       if [[ -n "${app_ref:-}" ]]; then
         if [[ -d "$app_ref" ]]; then
-          log "SKIP (script shim references app): $bin_path -> $app_ref"
+          if [[ "${explain}" == "true" ]]; then
+            explain_log "Bins: skip script shim references app: bin=${bin_path} app_ref=${app_ref}"
+          fi
           continue
         fi
 
@@ -289,7 +300,9 @@ run_bins_module() {
     # Skip binaries that are known to be installed (best-effort inventory guard).
     # WARNING: inventory keys are not a full package receipt system.
     if inv_has_key "$base"; then
-      log "SKIP (inventory match): $bin_path (key=$base)"
+      if [[ "${explain}" == "true" ]]; then
+        explain_log "Bins: skip inventory match: bin=${bin_path} key=${base}"
+      fi
       continue
     fi
 
@@ -317,13 +330,12 @@ run_bins_module() {
     BINS_FLAGGED_COUNT="0"
     BINS_DUR_S="${BINS_DUR_S:-0}"
 
-    log "No orphaned /usr/local/bin items found (by heuristics)."
-    log "Bins: inspected $(ls -1 "${dir}" 2>/dev/null | wc -l | tr -d ' ') entries; flagged=0."
+    log "Bins: inspected ${BINS_CHECKED_COUNT} item(s); flagged 0."
     summary_add "bins" "flagged=0"
     return 0
   fi
 
-  log "Bins: flagged ${flagged_count} item(s) in ${dir}."
+  log "Bins: inspected ${BINS_CHECKED_COUNT} item(s); flagged ${flagged_count}."
   log "Bins: flagged items:"
   for item in "${flagged_items[@]}"; do
     log "  - ${item}"
@@ -347,6 +359,10 @@ run_bins_module() {
 
   # Export flagged identifiers list for run summary consumption.
   BINS_FLAGGED_IDS_LIST="$({ printf '%s\n' "${flagged_items[@]:-}"; } 2>/dev/null || true)"
+  # Trim any trailing newline for summary list consumption.
+  if [[ -n "${BINS_FLAGGED_IDS_LIST:-}" ]]; then
+    BINS_FLAGGED_IDS_LIST="$(printf '%s' "${BINS_FLAGGED_IDS_LIST}" | sed '$s/\n$//')"
+  fi
   BINS_FLAGGED_COUNT="${flagged_count}"
   BINS_DUR_S="${BINS_DUR_S:-0}"
 

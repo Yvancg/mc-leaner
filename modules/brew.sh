@@ -80,7 +80,7 @@ _brew_array_len() {
   # expanding `${foo[@]}` still errors under `set -u`. So we must check "is set" too.
   if declare -p "$name" >/dev/null 2>&1; then
     if eval '[[ ${'"$name"'[@]+x} ]]'; then
-      eval "printf '%s\n' \${#$name[@]}"
+      eval "printf '%s\n' \${#${name}[@]}"
     else
       printf '0\n'
     fi
@@ -143,27 +143,6 @@ _brew_sorted_unique_lines() {
   # Purpose: normalize text list (sorted unique)
   # Usage: echo "$text" | _brew_sorted_unique_lines
   sort | awk 'NF' | uniq
-}
-
-_brew_display_path() {
-  # Purpose: display a path without leaking full filesystem paths.
-  # Behavior:
-  #   - explain=true: show basename only, prefixed with ".../" (never full path)
-  #   - explain=false: print "redacted"
-  local p="${1:-}"
-
-  if [[ "${BREW_EXPLAIN:-false}" == "true" ]]; then
-    local b=""
-    b="$(basename "${p}" 2>/dev/null || printf '%s' '')"
-    if [[ -n "${b}" ]]; then
-      printf '%s' ".../${b}"
-    else
-      printf '%s' '.../<path>'
-    fi
-    return 0
-  fi
-
-  printf '%s' 'redacted'
 }
 
 _brew_display_path() {
@@ -287,8 +266,15 @@ _brew_top_n_largest_formulae() {
     [[ -n "$f" ]] || continue
 
     # Versions: avoid `brew` calls; list version directories under Cellar/<formula>.
+    local versions_list=()
+    local v
+    for v in "$cellar/$f"/*; do
+      [[ -e "$v" ]] || continue
+      [[ -d "$v" ]] || continue
+      versions_list+=("$(basename "$v" 2>/dev/null || printf '%s' '')")
+    done
     local versions
-    versions=$(ls -1 "$cellar/$f" 2>/dev/null | _brew_sorted_unique_lines || true)
+    versions="$(printf '%s\n' "${versions_list[@]}" | _brew_sorted_unique_lines || true)"
     versions=$(printf '%s\n' "$versions" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g' | sed -E 's/[[:space:]]+$//')
 
     log "BREW SIZE: ${f} | ${mb}MB | versions: ${versions:-unknown}"

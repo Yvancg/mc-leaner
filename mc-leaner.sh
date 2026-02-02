@@ -357,7 +357,7 @@ _emit_disk_service_insights() {
   # - Only flagged disk items (DISK_FLAGGED_RECORDS_LIST)
   # - Only inventory-backed owners (skip Unknown)
   # - One persistence per owner (prefer boot over login)
-  local svc_map disk_line owner persistence size_h
+  local svc_map owner persistence size_h
   local seen_owners
   seen_owners=$'\n'
 

@@ -313,7 +313,7 @@ run_launchd_module() {
     _launchd_tmpfiles+=("${active_jobs_file}")
 
     # Helper: determine whether a label is currently loaded (reduces false positives)
-    launchctl list 2>/dev/null | awk 'NR>1 {print $3}' 2>/dev/null | grep -v '^-$' 2>/dev/null >"${active_jobs_file}" 2>/dev/null || true
+    launchctl list 2>/dev/null | awk 'NR>1 {print $3}' | grep -v '^-$' >"${active_jobs_file}" 2>/dev/null || true
   else
     active_jobs_file=""
   fi

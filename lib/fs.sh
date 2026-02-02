@@ -79,13 +79,6 @@ MOVE_LAST_CODE=""     # permission|busy|not_found|exists|unknown
 MOVE_LAST_MESSAGE=""  # human-readable error or note
 MOVE_LAST_DEST=""     # destination path when moved
 
-#
-# Contract fields for the last move attempt. Modules can read these.
-MOVE_LAST_STATUS=""   # moved|failed|skipped
-MOVE_LAST_CODE=""     # permission|busy|not_found|exists|unknown
-MOVE_LAST_MESSAGE=""  # human-readable error or note
-MOVE_LAST_DEST=""     # destination path when moved
-
 # Purpose: Classify common mv errors into stable, user-facing codes.
 classify_move_error() {
   local msg="$1"

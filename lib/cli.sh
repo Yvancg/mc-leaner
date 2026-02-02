@@ -10,7 +10,6 @@
 MODE="scan"
 APPLY="false"
 BACKUP_DIR=""
-ONLY_MODULE=""  # Reserved for future module-level selection
 EXPLAIN="false"
 
 # Supported modes are declared once to avoid drift between help text and validation.

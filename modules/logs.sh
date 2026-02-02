@@ -91,10 +91,6 @@ _logs_rotations_summary() {
   dir="$(dirname "$p")"
   base="$(basename "$p")"
 
-  # Escape regex metacharacters in base to avoid unintended regex behavior
-  local base_re
-  base_re="$(printf '%s' "$base" | sed -E 's/[][(){}.^$*+?|\\]/\\\\&/g')"
-
   # Skip if directory is unreadable
   [[ -d "$dir" ]] || return 0
 
@@ -105,14 +101,19 @@ _logs_rotations_summary() {
   #   file.log.1.gz
   #   file.log.gz
   # Also include *.old
-  local matches
-  matches=$(ls -1 "$dir" 2>/dev/null | grep -E "^${base_re}(\\.[0-9]+)?(\\.gz)?$|^${base_re}\\.old$" || true)
-  [[ -n "$matches" ]] || return 0
+  local matches=()
+  local fp
+  for fp in "$dir/$base".old "$dir/$base".gz "$dir/$base".[0-9]* "$dir/$base".[0-9]*.gz; do
+    [[ -e "$fp" ]] || continue
+    matches+=("$(basename "$fp" 2>/dev/null || printf '%s' '')")
+  done
+  [[ ${#matches[@]} -gt 0 ]] || return 0
 
   _logs_explain "  Rotated (same dir):"
 
   # Print each match with size
-  echo "$matches" | while IFS= read -r f; do
+  local f
+  for f in "${matches[@]}"; do
     [[ -n "$f" ]] || continue
     local fp
     fp="$dir/$f"

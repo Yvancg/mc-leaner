@@ -401,7 +401,8 @@ _startup_infer_impact() {
   fi
 
   # Known heavy categories (take max; do not sum)
-  local hay="$( _startup_lc "${label} ${exec_path}" )"
+  local hay
+  hay="$( _startup_lc "${label} ${exec_path}" )"
   local cat=0
 
   # virtualization
@@ -776,14 +777,8 @@ run_startup_module() {
   STARTUP_BOOT_FLAGGED_COUNT="${STARTUP_BOOT_FLAGGED}"
   STARTUP_LOGIN_FLAGGED_COUNT="${STARTUP_LOGIN_FLAGGED}"
   STARTUP_SURFACE_BREAKDOWN="${STARTUP_SURFACE}"
-  STARTUP_ESTIMATED_RISK="${STARTUP_ESTIMATED_RISK}"
 
   log "Startup: inspected ${STARTUP_CHECKED} item(s); flagged ${STARTUP_FLAGGED} (unknown owner ${STARTUP_UNKNOWN})"
-}
-
-# Compatibility: some runners may call `run_startup` (without the `_module` suffix).
-run_startup() {
-  run_startup_module "$@"
 }
 
 # End of module

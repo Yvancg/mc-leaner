@@ -31,15 +31,6 @@ log_info()  { log "$@"; }
 log_warn()  { log "$@"; }
 log_error() { log "$@"; }
 
-# Purpose: Log an error message and exit non-zero
-# Usage: die "message" [exit_code]
-die() {
-  local msg="${1:-}"
-  local code="${2:-1}"
-  log_error "$msg"
-  exit "$code"
-}
-
 explain_log() {
   # Purpose: Emit verbose reasoning only when --explain is enabled.
   # Safety: Logging only. Always stderr. Ignore EPIPE.
@@ -384,6 +375,12 @@ SUMMARY_MODULE_LINES=()
 SUMMARY_ACTION_LINES=()
 SUMMARY_INFO_LINES=()
 
+# Structured key-value metrics per module (best-effort)
+declare -a SUMMARY_SET_KEYS
+declare -a SUMMARY_SET_VALUES
+SUMMARY_SET_KEYS=()
+SUMMARY_SET_VALUES=()
+
 summary__ensure_arrays() {
   # Purpose: ensure summary arrays exist even if unset by a caller
   # Safety: logging only
@@ -407,6 +404,16 @@ summary__ensure_arrays() {
   if ! declare -p SUMMARY_INFO_LINES >/dev/null 2>&1; then
     declare -a SUMMARY_INFO_LINES
     SUMMARY_INFO_LINES=()
+  fi
+
+  if ! declare -p SUMMARY_SET_KEYS >/dev/null 2>&1; then
+    declare -a SUMMARY_SET_KEYS
+    SUMMARY_SET_KEYS=()
+  fi
+
+  if ! declare -p SUMMARY_SET_VALUES >/dev/null 2>&1; then
+    declare -a SUMMARY_SET_VALUES
+    SUMMARY_SET_VALUES=()
   fi
 }
 
@@ -442,10 +449,76 @@ summary_add_info() {
   SUMMARY_INFO_LINES+=("$*")
 }
 
+summary_set() {
+  # Usage: summary_set <module> <key> <value>
+  # Purpose: record structured key-value metrics for a module
+  # Safety: logging only
+  summary__ensure_arrays
+
+  local module="${1:-}"
+  local key="${2:-}"
+  local value="${3:-}"
+  [[ -n "$module" && -n "$key" ]] || return 1
+
+  local full_key="${module}.${key}"
+  local i
+  for i in "${!SUMMARY_SET_KEYS[@]}"; do
+    if [[ "${SUMMARY_SET_KEYS[i]}" == "$full_key" ]]; then
+      SUMMARY_SET_VALUES[i]="$value"
+      return 0
+    fi
+  done
+
+  SUMMARY_SET_KEYS+=("$full_key")
+  SUMMARY_SET_VALUES+=("$value")
+}
+
+summary__append_set_lines() {
+  # Purpose: convert summary_set key-values into module lines
+  summary__ensure_arrays
+  local modules=()
+  local full module key value
+  local i
+
+  for i in "${!SUMMARY_SET_KEYS[@]}"; do
+    full="${SUMMARY_SET_KEYS[i]}"
+    module="${full%%.*}"
+    local seen="false"
+    local m
+    for m in "${modules[@]}"; do
+      if [[ "$m" == "$module" ]]; then
+        seen="true"
+        break
+      fi
+    done
+    if [[ "$seen" == "false" ]]; then
+      modules+=("$module")
+    fi
+  done
+
+  local line
+  for module in "${modules[@]}"; do
+    line="${module}:"
+    for i in "${!SUMMARY_SET_KEYS[@]}"; do
+      full="${SUMMARY_SET_KEYS[i]}"
+      if [[ "${full%%.*}" == "$module" ]]; then
+        key="${full#*.}"
+        value="${SUMMARY_SET_VALUES[i]}"
+        line+=" ${key}=${value}"
+      fi
+    done
+    SUMMARY_MODULE_LINES+=("$line")
+  done
+}
+
 summary_print() {
   # Purpose: print consolidated summary at end of run
 
   summary__ensure_arrays
+
+  if [ "${#SUMMARY_SET_KEYS[@]}" -gt 0 ]; then
+    summary__append_set_lines
+  fi
 
   local module_count=${#SUMMARY_MODULE_LINES[@]}
   local legacy_count=${#SUMMARY_LINES[@]}

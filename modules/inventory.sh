@@ -723,6 +723,108 @@ inventory_lookup() {
   printf '%s\n' "$line"
 }
 
+inventory_lookup_owner_by_bundle_id() {
+  # Public: return owner name for a bundle id (best-effort)
+  local bundle_id="${1:-}"
+  [[ -n "$bundle_id" ]] || return 1
+
+  local hit
+  if hit="$(inventory_lookup "$bundle_id" 2>/dev/null)"; then
+    local hit_name hit_source hit_path
+    IFS=$'\t' read -r hit_name hit_source hit_path <<< "$hit"
+    [[ -n "$hit_name" ]] || return 1
+    printf '%s' "$hit_name"
+    return 0
+  fi
+
+  return 1
+}
+
+inventory_lookup_owner_by_path() {
+  # Public: return owner name for an app path or path inside an app bundle
+  local p="${1:-}"
+  [[ -n "$p" ]] || return 1
+
+  local hit
+  if hit="$(inventory_lookup "path:$p" 2>/dev/null)"; then
+    local hit_name hit_source hit_path
+    IFS=$'\t' read -r hit_name hit_source hit_path <<< "$hit"
+    [[ -n "$hit_name" ]] || return 1
+    printf '%s' "$hit_name"
+    return 0
+  fi
+
+  if [[ "$p" == *".app/"* ]]; then
+    local app_dir
+    app_dir="${p%%.app/*}.app"
+    if [[ -n "$app_dir" ]] && hit="$(inventory_lookup "path:$app_dir" 2>/dev/null)"; then
+      local hit_name hit_source hit_path
+      IFS=$'\t' read -r hit_name hit_source hit_path <<< "$hit"
+      [[ -n "$hit_name" ]] || return 1
+      printf '%s' "$hit_name"
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
+inventory_lookup_owner_by_name() {
+  # Public: return owner name for a fuzzy app name
+  local name="${1:-}"
+  [[ -n "$name" ]] || return 1
+
+  local hit
+  if hit="$(inventory_lookup "$name" 2>/dev/null)"; then
+    local hit_name hit_source hit_path
+    IFS=$'\t' read -r hit_name hit_source hit_path <<< "$hit"
+    [[ -n "$hit_name" ]] || return 1
+    printf '%s' "$hit_name"
+    return 0
+  fi
+
+  local key
+  key="$(_inventory_normalize_app_key "$name")"
+  if [[ -n "$key" ]] && hit="$(inventory_lookup "$key" 2>/dev/null)"; then
+    local hit_name hit_source hit_path
+    IFS=$'\t' read -r hit_name hit_source hit_path <<< "$hit"
+    [[ -n "$hit_name" ]] || return 1
+    printf '%s' "$hit_name"
+    return 0
+  fi
+
+  return 1
+}
+
+inventory_lookup_brew_service_owner() {
+  # Public: return owner name for a Homebrew service label
+  local label="${1:-}"
+  [[ -n "$label" ]] || return 1
+
+  local formula=""
+  case "$label" in
+    homebrew.mxcl.*)
+      formula="${label#homebrew.mxcl.}"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  [[ -n "$formula" ]] || return 1
+
+  local hit
+  if hit="$(inventory_lookup "brew:formula:$formula" 2>/dev/null)"; then
+    local hit_name hit_source hit_path
+    IFS=$'\t' read -r hit_name hit_source hit_path <<< "$hit"
+    [[ -n "$hit_name" ]] || return 1
+    printf '%s' "$hit_name"
+    return 0
+  fi
+
+  return 1
+}
+
 resolve_owner_from_path() {
   # Public: best-effort owner resolution.
   # Prints: owner_name|owner_key|owner_source|installed(true/false)

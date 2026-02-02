@@ -104,7 +104,7 @@ _leftovers_repo_root() {
   local here
   here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   # modules/ -> repo root
-  echo "$(cd "${here}/.." && pwd)"
+  (cd "${here}/.." 2>/dev/null && pwd)
 }
 
 _leftovers_expand_path() {

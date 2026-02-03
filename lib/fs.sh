@@ -51,14 +51,23 @@ safe_move() {
     err="$(mv "$src" "$dst" 2>&1)"
     rc=$?
   else
-    err="$(sudo mv "$src" "$dst" 2>&1)"
-    rc=$?
+    if [[ "${ALLOW_SUDO:-false}" != "true" ]]; then
+      err="sudo disabled (use --allow-sudo)"
+      rc=1
+    else
+      err="$(sudo mv "$src" "$dst" 2>&1)"
+      rc=$?
+    fi
   fi
   set -e
 
   if [[ $rc -ne 0 ]]; then
     # SAFETY: retry with sudo only when the first attempt was non-sudo and the error is permission-like.
     if [[ -w "$parent" ]] && { [[ "$err" == *"Operation not permitted"* ]] || [[ "$err" == *"Permission denied"* ]]; }; then
+      if [[ "${ALLOW_SUDO:-false}" != "true" ]]; then
+        echo "sudo disabled (use --allow-sudo)" >&2
+        return $rc
+      fi
       sudo mv "$src" "$dst"
     else
       echo "$err" >&2
@@ -87,6 +96,67 @@ backup_manifest_checksum_path() {
   printf '%s/.mcleaner_manifest.sha256' "$backup_dir"
 }
 
+backup_manifest_ensure_header() {
+  # Purpose: ensure a header is present for v2 manifests
+  local backup_dir="$1"
+  local manifest
+  manifest="$(backup_manifest_path "$backup_dir")" || return 1
+
+  if [[ -s "$manifest" ]]; then
+    return 0
+  fi
+
+  local ts
+  ts="$(/bin/date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "")"
+  {
+    printf '%s\n' "# mcleaner_manifest_v=2"
+    printf '%s\n' "# created_at=${ts}"
+    printf '%s\n' "# version=${MCLEANER_VERSION:-unknown}"
+    printf '%s\n' "# encoding=base64"
+    printf '%s\n' "# fields=epoch\tpath_src_b64\tpath_dest_b64"
+  } >> "$manifest" 2>/dev/null || return 1
+
+  return 0
+}
+
+backup_manifest_format_detect() {
+  # Purpose: detect manifest format (v2 base64 or legacy)
+  # Output: echoes "v2" or "legacy"
+  local backup_dir="$1"
+  local manifest
+  manifest="$(backup_manifest_path "$backup_dir")" || { printf '%s' "legacy"; return 0; }
+  [[ -f "$manifest" ]] || { printf '%s' "legacy"; return 0; }
+
+  local line ts src_field dest_field decoded
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ -n "$line" ]] || continue
+    if [[ "$line" == \#* ]]; then
+      if [[ "$line" == "# mcleaner_manifest_v=2"* ]]; then
+        printf '%s' "v2"
+        return 0
+      fi
+      continue
+    fi
+    IFS=$'\t' read -r ts src_field dest_field <<< "$line"
+    [[ -n "$src_field" && -n "$dest_field" ]] || continue
+    if [[ "$src_field" =~ ^[A-Za-z0-9+/=]+$ && "$dest_field" =~ ^[A-Za-z0-9+/=]+$ ]]; then
+      decoded="$(printf '%s' "$src_field" | /usr/bin/base64 -D 2>/dev/null || true)"
+      if [[ -n "$decoded" && "$decoded" == /* ]]; then
+        decoded="$(printf '%s' "$dest_field" | /usr/bin/base64 -D 2>/dev/null || true)"
+        if [[ -n "$decoded" && "$decoded" == /* ]]; then
+          printf '%s' "v2"
+          return 0
+        fi
+      fi
+    fi
+    printf '%s' "legacy"
+    return 0
+  done < "$manifest"
+
+  printf '%s' "legacy"
+  return 0
+}
+
 backup_manifest_checksum_update() {
   # Purpose: update checksum file for the manifest (best-effort)
   local backup_dir="$1"
@@ -104,6 +174,33 @@ backup_manifest_checksum_update() {
   return 0
 }
 
+backup_manifest_checksum_verify() {
+  # Purpose: verify checksum for a backup manifest
+  # Returns:
+  #  0 = ok
+  #  1 = checksum missing
+  #  2 = checksum mismatch
+  #  3 = error
+  local backup_dir="$1"
+  local manifest checksum_file expected_checksum actual_checksum
+
+  manifest="$(backup_manifest_path "$backup_dir")" || return 3
+  [[ -f "$manifest" ]] || return 3
+
+  checksum_file="$(backup_manifest_checksum_path "$backup_dir")" || return 3
+  [[ -f "$checksum_file" ]] || return 1
+
+  expected_checksum="$(head -n 1 "$checksum_file" 2>/dev/null | tr -d '[:space:]')"
+  actual_checksum="$(/usr/bin/shasum -a 256 "$manifest" 2>/dev/null | awk '{print $1}')"
+  [[ -n "$expected_checksum" && -n "$actual_checksum" ]] || return 3
+
+  if [[ "$expected_checksum" != "$actual_checksum" ]]; then
+    return 2
+  fi
+
+  return 0
+}
+
 backup_manifest_append() {
   # Purpose: record a move in the backup manifest (best-effort)
   local src="$1"
@@ -114,6 +211,8 @@ backup_manifest_append() {
 
   local manifest
   manifest="$(backup_manifest_path "$backup_dir")" || return 0
+
+  backup_manifest_ensure_header "$backup_dir" || true
 
   local ts
   ts="$(/bin/date +%s 2>/dev/null || echo "")"
@@ -221,6 +320,10 @@ safe_restore() {
 
   if [[ ! -d "$parent" ]]; then
     if ! mkdir -p "$parent" 2>/dev/null; then
+      if [[ "${ALLOW_SUDO:-false}" != "true" ]]; then
+        echo "sudo disabled (use --allow-sudo)" >&2
+        return 1
+      fi
       sudo mkdir -p "$parent" 2>/dev/null || true
     fi
   fi
@@ -232,13 +335,22 @@ safe_restore() {
     err="$(mv "$backup_path" "$restore_path" 2>&1)"
     rc=$?
   else
-    err="$(sudo mv "$backup_path" "$restore_path" 2>&1)"
-    rc=$?
+    if [[ "${ALLOW_SUDO:-false}" != "true" ]]; then
+      err="sudo disabled (use --allow-sudo)"
+      rc=1
+    else
+      err="$(sudo mv "$backup_path" "$restore_path" 2>&1)"
+      rc=$?
+    fi
   fi
   set -e
 
   if [[ $rc -ne 0 ]]; then
     if [[ -w "$parent" ]] && { [[ "$err" == *"Operation not permitted"* ]] || [[ "$err" == *"Permission denied"* ]]; }; then
+      if [[ "${ALLOW_SUDO:-false}" != "true" ]]; then
+        echo "sudo disabled (use --allow-sudo)" >&2
+        return $rc
+      fi
       sudo mv "$backup_path" "$restore_path"
     else
       echo "$err" >&2

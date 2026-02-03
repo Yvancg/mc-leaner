@@ -52,6 +52,7 @@ Startup inspection does not disable anything, system launchd items are opt-in, a
 - Background service visibility records (`SERVICE?`) for correlation
 - JSON summary output and report export
 - Backup management (list and restore with manifest checksum)
+- Versioned JSON schema and `--version`
 
 All modules are **inspection-only by default**.  
 Cleanup actions require `--apply` and explicit confirmation.
@@ -140,6 +141,7 @@ Detailed behavior, guarantees, and design rationale live in `docs/`:
 - `docs/SAFETY.md` — safety guarantees and non-interactive behavior
 - `docs/README-FULL.md` — full, extended documentation
 - `docs/ROADMAP.md` — planned direction and scope boundaries
+- `docs/OUTPUT_SCHEMA.md` — JSON output contract
 
 Project contracts and policies:
 

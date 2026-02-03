@@ -24,9 +24,12 @@
 # - Returns success (0) only on explicit confirmation.
 ask_yes_no() {
   local msg="$1"
+  local allow_gui="${GUI_PROMPTS:-auto}"
+  local prompt_in=""
+  local prompt_out=""
 
   # Prefer GUI prompts for clarity and to reduce accidental approvals
-  if command -v osascript >/dev/null 2>&1; then
+  if [[ "${allow_gui}" != "false" ]] && command -v osascript >/dev/null 2>&1; then
     # SAFETY: pass the message as an argument to avoid quote/escape issues.
     osascript \
       -e 'on run argv' \
@@ -38,9 +41,21 @@ ask_yes_no() {
   fi
 
   # Terminal fallback: default to "No" on empty input
-  printf "%s [y/N]: " "$msg"
+  if [[ -r /dev/tty ]]; then
+    prompt_in="/dev/tty"
+  else
+    prompt_in="/dev/stdin"
+  fi
+
+  if [[ -w /dev/tty ]]; then
+    prompt_out="/dev/tty"
+  else
+    prompt_out="/dev/stderr"
+  fi
+
+  printf "%s [y/N]: " "$msg" > "$prompt_out"
   # SAFETY: treat read failures (EOF) as "No" and continue deterministically.
-  read -r ans || true
+  read -r ans < "$prompt_in" || true
   [[ "${ans:-}" =~ ^[Yy]$ ]]
 }
 

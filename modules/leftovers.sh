@@ -142,10 +142,19 @@ _leftovers_confirm_move() {
 
   # Fallback: terminal prompt.
   local ans=""
-  echo ""
-  echo "Move this folder to backup?"
-  echo "  ${p}"
-  read -r -p "Type 'yes' to confirm: " ans
+  local prompt_out="/dev/stderr"
+  local prompt_in="/dev/stdin"
+  if [[ -w /dev/tty ]]; then
+    prompt_out="/dev/tty"
+  fi
+  if [[ -r /dev/tty ]]; then
+    prompt_in="/dev/tty"
+  fi
+  printf "\n" > "$prompt_out"
+  printf "Move this folder to backup?\n" > "$prompt_out"
+  printf "  %s\n" "${p}" > "$prompt_out"
+  printf "Type 'yes' to confirm: " > "$prompt_out"
+  read -r ans < "$prompt_in"
   [[ "$ans" == "yes" ]]
 }
 

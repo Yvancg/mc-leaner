@@ -10,6 +10,29 @@ This project follows a pragmatic versioning scheme:
 
 ---
 
+## v2.5.0 — Contracts, verification, and automation readiness
+
+**Release date:** Unreleased
+
+### Added
+
+- Version source (`VERSION`) and `--version`
+- JSON schema contract (`docs/OUTPUT_SCHEMA.md`)
+- Stable exit codes for automation
+- Backup verification (`--verify-backup`) with manifest format detection
+- Manifest headers for v2 backups
+- Prompt controls (`--no-gui`, `--gui`) and `--quiet`
+- `--allow-sudo` gate for privileged moves/restores
+- CI workflow with shellcheck + JSON golden test
+
+### Changed
+
+- Human prompts now write to stderr/tty (stdout reserved for machine output)
+
+### Fixed
+
+- Legacy backup restore can proceed with explicit acknowledgement
+
 ## v2.4.0 — Output, restore safety, and configurability
 
 **Release date:** 2026-02-03

@@ -59,6 +59,7 @@ mc-leaner provides built-in restore helpers:
 
 ```bash
 bash mc-leaner.sh --list-backups
+bash mc-leaner.sh --verify-backup /path/to/McLeaner_Backups_YYYYMMDD_HHMMSS
 bash mc-leaner.sh --restore-backup /path/to/McLeaner_Backups_YYYYMMDD_HHMMSS
 ```
 

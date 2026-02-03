@@ -62,11 +62,22 @@ If you want to understand what is running on your system—and clean it safely�
 
 ## What mc-leaner does (current)
 
-As of v2.4.0, all modules follow a strict inspection-first contract, share a unified inventory core, and produce explicit, reviewable run summaries.
+As of v2.5.0, all modules follow a strict inspection-first contract, share a unified inventory core, and produce explicit, reviewable run summaries.
 
 ### Release highlights
 
-#### v2.4.0 (unreleased)
+#### v2.5.0 (in progress)
+
+**Contracts, verification, and automation readiness**
+
+- Versioned JSON schema with contract doc
+- Stable exit codes for automation
+- Backup verification (`--verify-backup`) and manifest headers
+- Privilege gate for sudo (`--allow-sudo`)
+- Prompt controls (`--no-gui`, `--gui`) and `--quiet`
+- `--version` flag and `VERSION` source of truth
+
+#### v2.4.0 (released)
 
 **Output, restore safety, and configurability**
 
@@ -431,17 +442,43 @@ mc-leaner uses a small set of global flags that apply consistently across all mo
 - `--export <path>`  
   Write a full report to a file (human logs + machine records).
 
+- `--verify-backup <path>`  
+  Verify a backup folder manifest and checksum (no restore).
+
 - `--list-backups`  
   List backup folders created on this machine.
 
 - `--restore-backup <path>`  
   Restore items from a backup folder (uses checksum-validated manifest; prompts per item).
 
+- `--allow-sudo`  
+  Allow sudo for privileged moves/restores (default: off).
+
+- `--no-gui` / `--gui`  
+  Disable or force GUI prompts when available.
+
+- `--quiet`  
+  Suppress human logs (errors only).
+
+- `--version`  
+  Print version and exit.
+
 - `--progress`  
   Emit a simple progress indicator per module.
 
 **Important:**  
 If mc-leaner cannot prompt for confirmation (non-interactive run), cleanup actions are skipped automatically for safety.
+
+---
+
+## Exit codes
+
+- 0: success
+- 2: usage or invalid arguments
+- 3: config error (missing backup dir/manifest)
+- 4: IO error (file creation/read/write)
+- 5: safety violation (e.g., checksum mismatch, missing checksum on v2)
+- 6: partial failure (some restore actions failed)
 
 ---
 
@@ -531,6 +568,7 @@ Follow this flow to stay safe and avoid surprises.
 6. Restore if needed
 
 - List backups: `bash mc-leaner.sh --list-backups`
+- Verify: `bash mc-leaner.sh --verify-backup <backup_dir>`
 - Restore: `bash mc-leaner.sh --restore-backup <backup_dir>`
 - Reboot if the item relates to launchd or system services
 
@@ -571,9 +609,10 @@ mc-leaner/
 │   ├── protected-labels.conf   # security & never-touch rules (future)
 │   └── modes.conf              # mode → module mapping (future)
 ├── docs/
-│   ├── FAQ.md
-│   ├── SAFETY.md
-│   └── ROADMAP.md
+  │   ├── FAQ.md
+  │   ├── SAFETY.md
+  │   ├── OUTPUT_SCHEMA.md
+  │   └── ROADMAP.md
 ├── assets/
 │   └── social-preview.png
 ├── CONTRIBUTING.md

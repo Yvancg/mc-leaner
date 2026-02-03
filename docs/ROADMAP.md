@@ -275,6 +275,18 @@ Focus: **output flexibility and restore safety**
 
 ---
 
+## v2.5.0 (in progress)
+
+Focus: **contracts and automation readiness**
+
+- Versioned JSON schema + `--version`
+- Stable exit codes
+- Backup verification (`--verify-backup`) and manifest headers
+- Prompt controls (`--no-gui`, `--gui`) and `--quiet`
+- `--allow-sudo` gate for privileged moves/restores
+
+---
+
 ## v3.0 (long term)
 
 Focus: **self-contained inspection application**

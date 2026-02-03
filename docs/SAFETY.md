@@ -20,6 +20,7 @@ mc-leaner guarantees the following:
 
 - mc-leaner never deletes files
 - All cleanup actions move files to a timestamped backup folder
+- Privileged moves require explicit `--allow-sudo`
 
 ### 3. Reversible actions
 

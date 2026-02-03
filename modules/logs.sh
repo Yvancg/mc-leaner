@@ -151,8 +151,8 @@ _logs_confirm_move() {
     return 1
   fi
 
-  if [[ "${NO_GUI:-false}" == "false" ]] && type ask_gui >/dev/null 2>&1; then
-    if ask_gui "$p"; then
+  if command -v ask_yes_no >/dev/null 2>&1; then
+    if ask_yes_no "Move to backup?\n${p}"; then
       return 0
     fi
     return 1
@@ -175,7 +175,7 @@ _logs_confirm_move() {
   if [[ -w /dev/tty ]]; then
     printf "Move to backup? %s [y/N] " "$p" > /dev/tty
   else
-    printf "Move to backup? %s [y/N] " "$p"
+    printf "Move to backup? %s [y/N] " "$p" >&2
   fi
 
   local ans=""

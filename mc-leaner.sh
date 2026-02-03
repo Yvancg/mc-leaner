@@ -249,34 +249,146 @@ list_backups() {
   fi
 }
 
-restore_backup() {
+verify_backup() {
   local backup_dir="$1"
   backup_dir="$(_expand_user_path "$backup_dir")"
 
   if [[ -z "$backup_dir" || ! -d "$backup_dir" ]]; then
+    log_error "Verify: backup folder not found: ${backup_dir}"
+    return "${EXIT_CONFIG:-3}"
+  fi
+
+  local manifest
+  manifest="$(backup_manifest_path "$backup_dir")"
+  if [[ -z "$manifest" || ! -f "$manifest" ]]; then
+    log_error "Verify: manifest not found: ${manifest}"
+    return "${EXIT_CONFIG:-3}"
+  fi
+
+  local manifest_format
+  if declare -F backup_manifest_format_detect >/dev/null 2>&1; then
+    manifest_format="$(backup_manifest_format_detect "$backup_dir" 2>/dev/null || true)"
+  else
+    manifest_format="legacy"
+  fi
+  [[ -n "$manifest_format" ]] || manifest_format="legacy"
+
+  local checksum_status
+  if declare -F backup_manifest_checksum_verify >/dev/null 2>&1; then
+    backup_manifest_checksum_verify "$backup_dir" || checksum_status=$?
+  else
+    checksum_status=3
+  fi
+
+  local checksum_state="unknown"
+  case "${checksum_status:-0}" in
+    0) checksum_state="ok" ;;
+    1) checksum_state="missing" ;;
+    2) checksum_state="mismatch" ;;
+    *) checksum_state="error" ;;
+  esac
+
+  local total=0
+  local missing=0
+  local line ts src_field dest_field decoded
+  while IFS=$'\t' read -r ts src_field dest_field; do
+    [[ -n "$src_field" && -n "$dest_field" ]] || continue
+    [[ "$ts" == \#* ]] && continue
+    [[ "$ts" == \#* ]] && continue
+    total=$((total + 1))
+    if [[ "$manifest_format" == "v2" ]]; then
+      decoded="$(printf '%s' "$dest_field" | /usr/bin/base64 -D 2>/dev/null || true)"
+    else
+      decoded="$dest_field"
+    fi
+    if [[ -z "$decoded" || ! -e "$decoded" ]]; then
+      missing=$((missing + 1))
+    fi
+  done < "$manifest"
+
+  log "Verify: backup_dir=${backup_dir}"
+  log "Verify: manifest=${manifest}"
+  log "Verify: format=${manifest_format}"
+  log "Verify: checksum=${checksum_state}"
+  log "Verify: entries=${total} missing_in_backup=${missing}"
+
+  case "${checksum_state}" in
+    ok)
+      return "${EXIT_OK:-0}"
+      ;;
+    missing|mismatch)
+      return "${EXIT_SAFETY:-5}"
+      ;;
+    *)
+      return "${EXIT_IO:-4}"
+      ;;
+  esac
+}
+
+restore_backup() {
+  local backup_dir="$1"
+  backup_dir="$(_expand_user_path "$backup_dir")"
+
+  _decode_b64_path() {
+    local v="$1"
+    local out
+    out="$(printf '%s' "$v" | /usr/bin/base64 -D 2>/dev/null || true)"
+    [[ -n "$out" ]] || return 1
+    printf '%s' "$out"
+    return 0
+  }
+
+  if [[ -z "$backup_dir" || ! -d "$backup_dir" ]]; then
     log_error "Restore: backup folder not found: ${backup_dir}"
-    exit 1
+    return "${EXIT_CONFIG:-3}"
   fi
 
   local manifest
   manifest="$(backup_manifest_path "$backup_dir")"
   if [[ -z "$manifest" || ! -f "$manifest" ]]; then
     log_error "Restore: manifest not found: ${manifest}"
-    exit 1
+    return "${EXIT_CONFIG:-3}"
   fi
 
-  local checksum_file expected_checksum actual_checksum
-  checksum_file="$(backup_manifest_checksum_path "$backup_dir")"
-  if [[ -z "$checksum_file" || ! -f "$checksum_file" ]]; then
-    log_error "Restore: checksum not found: ${checksum_file}"
-    exit 1
+  local manifest_format
+  if declare -F backup_manifest_format_detect >/dev/null 2>&1; then
+    manifest_format="$(backup_manifest_format_detect "$backup_dir" 2>/dev/null || true)"
+  else
+    manifest_format="legacy"
   fi
-  expected_checksum="$(head -n 1 "$checksum_file" 2>/dev/null | tr -d '[:space:]')"
-  actual_checksum="$(/usr/bin/shasum -a 256 "$manifest" 2>/dev/null | awk '{print $1}')"
-  if [[ -z "$expected_checksum" || -z "$actual_checksum" || "$expected_checksum" != "$actual_checksum" ]]; then
-    log_error "Restore: checksum mismatch (manifest may be tampered)"
-    exit 1
+  [[ -n "$manifest_format" ]] || manifest_format="legacy"
+
+  local checksum_status
+  if declare -F backup_manifest_checksum_verify >/dev/null 2>&1; then
+    backup_manifest_checksum_verify "$backup_dir" || checksum_status=$?
+  else
+    checksum_status=3
   fi
+
+  case "${checksum_status:-0}" in
+    0)
+      :
+      ;;
+    1)
+      if [[ "$manifest_format" == "legacy" ]]; then
+        log_warn "Restore: legacy manifest detected (no checksum)"
+        if ! ask_yes_no "Proceed with legacy restore (no checksum validation)?"; then
+          return "${EXIT_SAFETY:-5}"
+        fi
+      else
+        log_error "Restore: checksum missing (manifest cannot be verified)"
+        return "${EXIT_SAFETY:-5}"
+      fi
+      ;;
+    2)
+      log_error "Restore: checksum mismatch (manifest may be tampered)"
+      return "${EXIT_SAFETY:-5}"
+      ;;
+    *)
+      log_error "Restore: checksum verification failed"
+      return "${EXIT_IO:-4}"
+      ;;
+  esac
 
   log "Restore: using backup folder: ${backup_dir}"
   log "Restore: manifest: ${manifest}"
@@ -289,12 +401,17 @@ restore_backup() {
   local skipped=0
   local failed=0
 
-  while IFS=$'\t' read -r ts src_b64 dest_b64; do
-    [[ -n "$src_b64" && -n "$dest_b64" ]] || continue
+  while IFS=$'\t' read -r ts src_field dest_field; do
+    [[ -n "$src_field" && -n "$dest_field" ]] || continue
 
     local src dest
-    src="$(printf '%s' "$src_b64" | /usr/bin/base64 -D 2>/dev/null || true)"
-    dest="$(printf '%s' "$dest_b64" | /usr/bin/base64 -D 2>/dev/null || true)"
+    if [[ "$manifest_format" == "legacy" ]]; then
+      src="$src_field"
+      dest="$dest_field"
+    else
+      src="$(_decode_b64_path "$src_field" 2>/dev/null || true)"
+      dest="$(_decode_b64_path "$dest_field" 2>/dev/null || true)"
+    fi
     [[ -n "$src" && -n "$dest" ]] || continue
 
     local dest_real
@@ -340,16 +457,25 @@ restore_backup() {
   done < "$manifest"
 
   log "Restore: completed restored=${restored} skipped=${skipped} failed=${failed}"
+  if [[ "${failed}" -gt 0 ]]; then
+    return "${EXIT_PARTIAL:-6}"
+  fi
+  return "${EXIT_OK:-0}"
 }
 
 if [[ "${LIST_BACKUPS:-false}" == "true" ]]; then
   list_backups
-  exit 0
+  exit "${EXIT_OK:-0}"
 fi
 
 if [[ -n "${RESTORE_BACKUP_DIR:-}" ]]; then
   restore_backup "${RESTORE_BACKUP_DIR}"
-  exit 0
+  exit $?
+fi
+
+if [[ -n "${VERIFY_BACKUP_DIR:-}" ]]; then
+  verify_backup "${VERIFY_BACKUP_DIR}"
+  exit $?
 fi
 
 # ----------------------------
@@ -375,14 +501,14 @@ if [[ -n "${EXPORT_FILE}" ]]; then
   export_dir="$(dirname "${EXPORT_FILE}")"
   if [[ -z "${export_dir}" ]]; then
     log_error "Export: invalid path: ${EXPORT_FILE}"
-    exit 1
+    exit "${EXIT_IO:-4}"
   fi
   mkdir -p "${export_dir}" 2>/dev/null || true
   if [[ ! -d "${export_dir}" ]]; then
     log_error "Export: cannot create directory: ${export_dir}"
-    exit 1
+    exit "${EXIT_IO:-4}"
   fi
-  : > "${EXPORT_FILE}" 2>/dev/null || { log_error "Export: cannot write to ${EXPORT_FILE}"; exit 1; }
+  : > "${EXPORT_FILE}" 2>/dev/null || { log_error "Export: cannot write to ${EXPORT_FILE}"; exit "${EXIT_IO:-4}"; }
   exec 2> >(tee -a "${EXPORT_FILE}" >&2)
 fi
 
@@ -397,14 +523,14 @@ if [[ -n "${JSON_FILE}" ]]; then
   json_dir="$(dirname "${JSON_FILE}")"
   if [[ -z "${json_dir}" ]]; then
     log_error "JSON: invalid path: ${JSON_FILE}"
-    exit 1
+    exit "${EXIT_IO:-4}"
   fi
   mkdir -p "${json_dir}" 2>/dev/null || true
   if [[ ! -d "${json_dir}" ]]; then
     log_error "JSON: cannot create directory: ${json_dir}"
-    exit 1
+    exit "${EXIT_IO:-4}"
   fi
-  : > "${JSON_FILE}" 2>/dev/null || { log_error "JSON: cannot write to ${JSON_FILE}"; exit 1; }
+  : > "${JSON_FILE}" 2>/dev/null || { log_error "JSON: cannot write to ${JSON_FILE}"; exit "${EXIT_IO:-4}"; }
 fi
 
 # ----------------------------
@@ -414,6 +540,7 @@ log "Mode: $MODE"
 log "Apply: $APPLY"
 log "Backup: $BACKUP_DIR"
 log "Backup note: used only when --apply causes moves (reversible)."
+log "Allow sudo: ${ALLOW_SUDO:-false}"
 
 # ----------------------------
 # Progress indicator (optional)
@@ -459,7 +586,7 @@ if [[ "${JSON_OUTPUT}" == "true" ]]; then
   JSON_RECORDS_FILE="$(tmpfile_new "mcleaner.records")"
   if [[ -z "${JSON_RECORDS_FILE}" ]]; then
     log_error "JSON: failed to create temp records file"
-    exit 1
+    exit "${EXIT_IO:-4}"
   fi
   exec 3>&1
   exec 1>"${JSON_RECORDS_FILE}"
@@ -781,7 +908,7 @@ case "$MODE" in
   clean)
     if [[ "$APPLY" != "true" ]]; then
       log_error "Refusing to clean without --apply (safety default)"
-      exit 1
+      exit "${EXIT_SAFETY:-5}"
     fi
 
     ensure_inventory
@@ -856,7 +983,7 @@ case "$MODE" in
   *)
     log_error "Unknown mode: $MODE"
     usage >&2
-    exit 1
+    exit "${EXIT_USAGE:-2}"
     ;;
 esac
 

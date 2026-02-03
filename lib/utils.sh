@@ -6,6 +6,16 @@
 # The entrypoint (mc-leaner.sh) is responsible for `set -euo pipefail`.
 
 # ----------------------------
+# Exit codes (stable contract)
+# ----------------------------
+EXIT_OK=0
+EXIT_USAGE=2
+EXIT_CONFIG=3
+EXIT_IO=4
+EXIT_SAFETY=5
+EXIT_PARTIAL=6
+
+# ----------------------------
 # Logging
 # ----------------------------
 # Purpose: Emit a stable timestamp for log lines.
@@ -19,7 +29,9 @@ ts() {
 log() {
   local _ts=""
   _ts="$(ts)"
-  printf '[%s] %s\n' "${_ts}" "$*" >&2 2>/dev/null || true
+  if [[ "${QUIET:-false}" != "true" ]]; then
+    printf '[%s] %s\n' "${_ts}" "$*" >&2 2>/dev/null || true
+  fi
 }
 
 # Compatibility wrappers (modules and entrypoint may call these)
@@ -27,12 +39,18 @@ log() {
 # Safety: logging only. Always stderr. Ignore EPIPE.
 log_info()  { log "$@"; }
 log_warn()  { log "$@"; }
-log_error() { log "$@"; }
+
+log_error() {
+  # Purpose: always emit errors even in quiet mode
+  local _ts=""
+  _ts="$(ts)"
+  printf '[%s] %s\n' "${_ts}" "$*" >&2 2>/dev/null || true
+}
 
 explain_log() {
   # Purpose: Emit verbose reasoning only when --explain is enabled.
   # Safety: Logging only. Always stderr. Ignore EPIPE.
-  if [[ "${EXPLAIN:-false}" == "true" ]]; then
+  if [[ "${EXPLAIN:-false}" == "true" && "${QUIET:-false}" != "true" ]]; then
     printf '[EXPLAIN] %s\n' "$*" 1>&2 2>/dev/null || true
   fi
 }
@@ -497,6 +515,7 @@ declare -a SUMMARY_SET_KEYS
 declare -a SUMMARY_SET_VALUES
 SUMMARY_SET_KEYS=()
 SUMMARY_SET_VALUES=()
+JSON_SCHEMA_VERSION="1"
 
 summary__ensure_arrays() {
   # Purpose: ensure summary arrays exist even if unset by a caller
@@ -787,11 +806,16 @@ summary_emit_json() {
 
   printf '{'
   printf '"meta":{'
+  printf '"version":"%s",' "$(_json_escape "${MCLEANER_VERSION:-unknown}")"
+  printf '"schema_version":"%s",' "$(_json_escape "${JSON_SCHEMA_VERSION:-1}")"
   printf '"mode":"%s",' "$(_json_escape "${MODE:-}")"
   printf '"apply":%s,' "$(_json_bool "${APPLY:-false}")"
   printf '"explain":%s,' "$(_json_bool "${EXPLAIN:-false}")"
   printf '"startup_system":%s,' "$(_json_bool "${STARTUP_INCLUDE_SYSTEM:-false}")"
   printf '"backup_dir":"%s",' "$(_json_escape "${BACKUP_DIR:-}")"
+  printf '"quiet":%s,' "$(_json_bool "${QUIET:-false}")"
+  printf '"gui_prompts":"%s",' "$(_json_escape "${GUI_PROMPTS:-auto}")"
+  printf '"allow_sudo":%s,' "$(_json_bool "${ALLOW_SUDO:-false}")"
   printf '"thresholds_mb":{'
   printf '"caches":%s,' "$(_json_num_or_zero "${THRESHOLD_CACHES_MB:-0}")"
   printf '"logs":%s,' "$(_json_num_or_zero "${THRESHOLD_LOGS_MB:-0}")"

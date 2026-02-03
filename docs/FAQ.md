@@ -53,6 +53,19 @@ If something behaves unexpectedly, restore the files and reboot.
 
 ---
 
+## How do I restore from a backup folder?
+
+mc-leaner provides built-in restore helpers:
+
+```bash
+bash mc-leaner.sh --list-backups
+bash mc-leaner.sh --restore-backup /path/to/McLeaner_Backups_YYYYMMDD_HHMMSS
+```
+
+Restore uses a checksum-validated manifest and prompts per item. If you prefer, you can also restore manually by moving files back.
+
+---
+
 ## Why does mc-leaner flag something I still use?
 
 Detection is heuristic.
@@ -64,6 +77,37 @@ Some background services:
 - are managed externally (for example by Homebrew)
 
 mc-leaner flags items for **review**, not removal. If you still use an app, keep its services.
+
+---
+
+## Can I set defaults in a config file?
+
+Yes. mc-leaner reads `~/.mcleanerrc` as a simple `key=value` file before CLI parsing.
+
+Example:
+
+```ini
+mode=scan
+explain=true
+threshold=caches=300,logs=100
+json=true
+json_file=~/Desktop/mc-leaner.json
+export=~/Desktop/mc-leaner_report.txt
+progress=true
+```
+
+CLI flags always override config values. For safety, `apply=true` in the config is ignored unless you also pass `--apply` on the CLI.
+
+---
+
+## How do I get machine-readable output?
+
+Use `--json` for stdout or `--json-file` to write a file:
+
+```bash
+bash mc-leaner.sh --json
+bash mc-leaner.sh --json-file ~/Desktop/mc-leaner.json
+```
 
 ---
 

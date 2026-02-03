@@ -212,7 +212,145 @@ ensure_installed_bundle_ids() {
 # ----------------------------
 # Parse CLI arguments
 # ----------------------------
+load_config_file
 parse_args "$@"
+
+# ----------------------------
+# Backup management (early exit)
+# ----------------------------
+_expand_user_path() {
+  local p="$1"
+  if [[ "$p" == "~"* ]]; then
+    p="${p/#\~/$HOME}"
+  fi
+  printf '%s' "$p"
+}
+
+list_backups() {
+  local base="$HOME/Desktop"
+  local pattern="McLeaner_Backups_"
+  local -a found
+  found=()
+
+  if [[ -d "$base" ]]; then
+    local d
+    for d in "$base"/"${pattern}"*; do
+      [[ -d "$d" ]] || continue
+      found+=("$d")
+    done
+  fi
+
+  log "Backups: found ${#found[@]} backup folder(s) under ${base}"
+  if [[ "${#found[@]}" -gt 0 ]]; then
+    local f
+    for f in "${found[@]}"; do
+      log "  - ${f}"
+    done
+  fi
+}
+
+restore_backup() {
+  local backup_dir="$1"
+  backup_dir="$(_expand_user_path "$backup_dir")"
+
+  if [[ -z "$backup_dir" || ! -d "$backup_dir" ]]; then
+    log_error "Restore: backup folder not found: ${backup_dir}"
+    exit 1
+  fi
+
+  local manifest
+  manifest="$(backup_manifest_path "$backup_dir")"
+  if [[ -z "$manifest" || ! -f "$manifest" ]]; then
+    log_error "Restore: manifest not found: ${manifest}"
+    exit 1
+  fi
+
+  local checksum_file expected_checksum actual_checksum
+  checksum_file="$(backup_manifest_checksum_path "$backup_dir")"
+  if [[ -z "$checksum_file" || ! -f "$checksum_file" ]]; then
+    log_error "Restore: checksum not found: ${checksum_file}"
+    exit 1
+  fi
+  expected_checksum="$(head -n 1 "$checksum_file" 2>/dev/null | tr -d '[:space:]')"
+  actual_checksum="$(/usr/bin/shasum -a 256 "$manifest" 2>/dev/null | awk '{print $1}')"
+  if [[ -z "$expected_checksum" || -z "$actual_checksum" || "$expected_checksum" != "$actual_checksum" ]]; then
+    log_error "Restore: checksum mismatch (manifest may be tampered)"
+    exit 1
+  fi
+
+  log "Restore: using backup folder: ${backup_dir}"
+  log "Restore: manifest: ${manifest}"
+
+  local backup_dir_real
+  backup_dir_real="$(cd "$backup_dir" 2>/dev/null && pwd -P)"
+  [[ -n "$backup_dir_real" ]] || backup_dir_real="$backup_dir"
+
+  local restored=0
+  local skipped=0
+  local failed=0
+
+  while IFS=$'\t' read -r ts src_b64 dest_b64; do
+    [[ -n "$src_b64" && -n "$dest_b64" ]] || continue
+
+    local src dest
+    src="$(printf '%s' "$src_b64" | /usr/bin/base64 -D 2>/dev/null || true)"
+    dest="$(printf '%s' "$dest_b64" | /usr/bin/base64 -D 2>/dev/null || true)"
+    [[ -n "$src" && -n "$dest" ]] || continue
+
+    local dest_real
+    dest_real="$dest"
+    if declare -F fs_resolve_symlink_target_physical >/dev/null 2>&1; then
+      dest_real="$(fs_resolve_symlink_target_physical "$dest" 2>/dev/null || true)"
+      [[ -n "$dest_real" ]] || dest_real="$dest"
+    fi
+
+    case "$dest_real" in
+      "$backup_dir_real"/*) : ;;
+      *)
+        log "Restore: skip (outside backup dir): ${dest}"
+        skipped=$((skipped + 1))
+        continue
+        ;;
+    esac
+
+    if [[ ! -e "$dest" ]]; then
+      log "Restore: skip (missing in backup): ${dest}"
+      skipped=$((skipped + 1))
+      continue
+    fi
+
+    if [[ -e "$src" ]]; then
+      log "Restore: skip (target exists): ${src}"
+      skipped=$((skipped + 1))
+      continue
+    fi
+
+    if ask_yes_no "Restore this item?\n${src}\n<-${dest}"; then
+      local restore_out
+      if restore_out="$(safe_restore "$dest" "$src" 2>&1)"; then
+        log "Restored: ${dest} -> ${restore_out}"
+        restored=$((restored + 1))
+      else
+        log "Restore failed: ${dest} | ${restore_out}"
+        failed=$((failed + 1))
+      fi
+    else
+      skipped=$((skipped + 1))
+    fi
+  done < "$manifest"
+
+  log "Restore: completed restored=${restored} skipped=${skipped} failed=${failed}"
+}
+
+if [[ "${LIST_BACKUPS:-false}" == "true" ]]; then
+  list_backups
+  exit 0
+fi
+
+if [[ -n "${RESTORE_BACKUP_DIR:-}" ]]; then
+  restore_backup "${RESTORE_BACKUP_DIR}"
+  exit 0
+fi
 
 # ----------------------------
 # Explain mode default (safe under set -u)
@@ -227,12 +365,108 @@ if [[ -z "${BACKUP_DIR:-}" ]]; then
 fi
 
 # ----------------------------
+# Report export (optional)
+# ----------------------------
+EXPORT_FILE="${EXPORT_FILE:-}"
+if [[ -n "${EXPORT_FILE}" ]]; then
+  if [[ "${EXPORT_FILE}" == "~"* ]]; then
+    EXPORT_FILE="${EXPORT_FILE/#\~/$HOME}"
+  fi
+  export_dir="$(dirname "${EXPORT_FILE}")"
+  if [[ -z "${export_dir}" ]]; then
+    log_error "Export: invalid path: ${EXPORT_FILE}"
+    exit 1
+  fi
+  mkdir -p "${export_dir}" 2>/dev/null || true
+  if [[ ! -d "${export_dir}" ]]; then
+    log_error "Export: cannot create directory: ${export_dir}"
+    exit 1
+  fi
+  : > "${EXPORT_FILE}" 2>/dev/null || { log_error "Export: cannot write to ${EXPORT_FILE}"; exit 1; }
+  exec 2> >(tee -a "${EXPORT_FILE}" >&2)
+fi
+
+# ----------------------------
+# JSON file output (optional)
+# ----------------------------
+JSON_FILE="${JSON_FILE:-}"
+if [[ -n "${JSON_FILE}" ]]; then
+  if [[ "${JSON_FILE}" == "~"* ]]; then
+    JSON_FILE="${JSON_FILE/#\~/$HOME}"
+  fi
+  json_dir="$(dirname "${JSON_FILE}")"
+  if [[ -z "${json_dir}" ]]; then
+    log_error "JSON: invalid path: ${JSON_FILE}"
+    exit 1
+  fi
+  mkdir -p "${json_dir}" 2>/dev/null || true
+  if [[ ! -d "${json_dir}" ]]; then
+    log_error "JSON: cannot create directory: ${json_dir}"
+    exit 1
+  fi
+  : > "${JSON_FILE}" 2>/dev/null || { log_error "JSON: cannot write to ${JSON_FILE}"; exit 1; }
+fi
+
+# ----------------------------
 # Log resolved execution plan
 # ----------------------------
 log "Mode: $MODE"
 log "Apply: $APPLY"
 log "Backup: $BACKUP_DIR"
 log "Backup note: used only when --apply causes moves (reversible)."
+
+# ----------------------------
+# Progress indicator (optional)
+# ----------------------------
+PROGRESS="${PROGRESS:-false}"
+PROGRESS_STEP=0
+PROGRESS_TOTAL=1
+
+progress_init() {
+  local mode="$1"
+  case "$mode" in
+    scan) PROGRESS_TOTAL=10 ;;
+    clean) PROGRESS_TOTAL=9 ;;
+    report) PROGRESS_TOTAL=1 ;;
+    inventory-only) PROGRESS_TOTAL=1 ;;
+    launchd-only) PROGRESS_TOTAL=1 ;;
+    startup-only) PROGRESS_TOTAL=1 ;;
+    bins-only) PROGRESS_TOTAL=1 ;;
+    caches-only) PROGRESS_TOTAL=1 ;;
+    logs-only) PROGRESS_TOTAL=1 ;;
+    brew-only) PROGRESS_TOTAL=1 ;;
+    leftovers-only) PROGRESS_TOTAL=1 ;;
+    permissions-only) PROGRESS_TOTAL=1 ;;
+    disk-only) PROGRESS_TOTAL=1 ;;
+    *) PROGRESS_TOTAL=1 ;;
+  esac
+}
+
+progress_step() {
+  local label="$1"
+  [[ "${PROGRESS}" == "true" ]] || return 0
+  PROGRESS_STEP=$((PROGRESS_STEP + 1))
+  log "Progress: ${PROGRESS_STEP}/${PROGRESS_TOTAL} ${label}"
+}
+
+# ----------------------------
+# JSON output mode (capture machine records)
+# ----------------------------
+JSON_OUTPUT="${JSON_OUTPUT:-false}"
+JSON_STDOUT="${JSON_STDOUT:-false}"
+JSON_RECORDS_FILE=""
+if [[ "${JSON_OUTPUT}" == "true" ]]; then
+  JSON_RECORDS_FILE="$(tmpfile_new "mcleaner.records")"
+  if [[ -z "${JSON_RECORDS_FILE}" ]]; then
+    log_error "JSON: failed to create temp records file"
+    exit 1
+  fi
+  exec 3>&1
+  exec 1>"${JSON_RECORDS_FILE}"
+elif [[ -n "${EXPORT_FILE}" ]]; then
+  # Include machine records in the exported report when JSON is not active.
+  exec 1> >(tee -a "${EXPORT_FILE}")
+fi
 
 # ----------------------------
 # Run summary (end-of-run)
@@ -361,6 +595,7 @@ _emit_disk_service_insights() {
 }
 
 run_started_s="$(_now_epoch_s)"
+progress_init "$MODE"
 
 # ----------------------------
 # Phase helpers (dedupe scan/clean dispatch)
@@ -432,7 +667,7 @@ _run_caches_phase() {
     run_apply="true"
   fi
 
-  run_caches_module "${run_mode}" "${run_apply}" "$BACKUP_DIR" "$EXPLAIN" "${inventory_index_file:-}"
+  run_caches_module "${run_mode}" "${run_apply}" "$BACKUP_DIR" "$EXPLAIN" "${inventory_index_file:-}" "${THRESHOLD_CACHES_MB:-200}"
 
   if [[ "${CACHES_FLAGGED_COUNT:-0}" -gt 0 && -n "${CACHES_FLAGGED_IDS_LIST:-}" ]]; then
     summary_add_list "caches" "${CACHES_FLAGGED_IDS_LIST}" 50
@@ -444,9 +679,9 @@ _run_logs_phase() {
   local apply_bool="${1:-false}"
 
   if [[ "${apply_bool}" != "true" ]]; then
-    run_logs_module "false" "$BACKUP_DIR" "$EXPLAIN" "50"
+    run_logs_module "false" "$BACKUP_DIR" "$EXPLAIN" "${THRESHOLD_LOGS_MB:-50}"
   else
-    run_logs_module "true" "$BACKUP_DIR" "$EXPLAIN" "50"
+    run_logs_module "true" "$BACKUP_DIR" "$EXPLAIN" "${THRESHOLD_LOGS_MB:-50}"
   fi
 
   if [[ "${LOGS_FLAGGED_COUNT:-0}" -gt 0 && -n "${LOGS_FLAGGED_IDS_LIST:-}" ]]; then
@@ -485,7 +720,7 @@ _run_disk_phase() {
   # NOTE: disk is inspection-only, always scan/false (even in clean/apply).
   ensure_inventory
 
-  run_disk_module "scan" "false" "$BACKUP_DIR" "$EXPLAIN" "$inventory_index_file"
+  run_disk_module "scan" "false" "$BACKUP_DIR" "$EXPLAIN" "$inventory_index_file" "${THRESHOLD_DISK_MB:-200}"
 
   if [[ "${DISK_FLAGGED_COUNT:-0}" -gt 0 && -n "${DISK_FLAGGED_IDS_LIST:-}" ]]; then
     summary_add_list "disk" "${DISK_FLAGGED_IDS_LIST}" 50
@@ -499,9 +734,9 @@ _run_leftovers_phase() {
   ensure_installed_bundle_ids
 
   if [[ "${apply_bool}" != "true" ]]; then
-    run_leftovers_module "false" "$BACKUP_DIR" "$EXPLAIN" "$installed_bundle_ids_file"
+    run_leftovers_module "false" "$BACKUP_DIR" "$EXPLAIN" "$installed_bundle_ids_file" "${inventory_index_file:-}" "${THRESHOLD_LEFTOVERS_MB:-50}"
   else
-    run_leftovers_module "true" "$BACKUP_DIR" "$EXPLAIN" "$installed_bundle_ids_file"
+    run_leftovers_module "true" "$BACKUP_DIR" "$EXPLAIN" "$installed_bundle_ids_file" "${inventory_index_file:-}" "${THRESHOLD_LEFTOVERS_MB:-50}"
   fi
 
   if [[ "${LEFTOVERS_FLAGGED_COUNT:-0}" -gt 0 && -n "${LEFTOVERS_FLAGGED_IDS_LIST:-}" ]]; then
@@ -522,15 +757,25 @@ case "$MODE" in
     ensure_inventory
     ensure_brew_bins
 
+    progress_step "brew"
     _run_brew_phase
+    progress_step "launchd"
     _run_launchd_phase "scan" "false"
+    progress_step "bins"
     _run_bins_phase "scan" "false"
+    progress_step "caches"
     _run_caches_phase "scan" "false"
+    progress_step "logs"
     _run_logs_phase "false"
+    progress_step "permissions"
     _run_permissions_phase "false"
+    progress_step "startup"
     _run_startup_phase
+    progress_step "disk"
     _run_disk_phase
+    progress_step "leftovers"
     _run_leftovers_phase "false"
+    progress_step "intel"
     _run_intel_phase
     ;;
   clean)
@@ -542,48 +787,68 @@ case "$MODE" in
     ensure_inventory
     ensure_brew_bins
 
+    progress_step "launchd"
     _run_launchd_phase "clean" "true"
+    progress_step "bins"
     _run_bins_phase "clean" "true"
+    progress_step "caches"
     _run_caches_phase "clean" "true"
+    progress_step "logs"
     _run_logs_phase "true"
+    progress_step "permissions"
     _run_permissions_phase "true"
+    progress_step "startup"
     _run_startup_phase
+    progress_step "disk"
     _run_disk_phase
+    progress_step "leftovers"
     _run_leftovers_phase "true"
+    progress_step "intel"
     _run_intel_phase
     ;;
   leftovers-only)
+    progress_step "leftovers"
     _run_leftovers_phase "$APPLY"
     ;;
   report)
+    progress_step "intel"
     _run_intel_phase
     ;;
   launchd-only)
+    progress_step "launchd"
     _run_launchd_phase "$([[ "$APPLY" == "true" ]] && printf 'clean' || printf 'scan')" "$APPLY"
     ;;
   bins-only)
+    progress_step "bins"
     _run_bins_phase "$([[ "$APPLY" == "true" ]] && printf 'clean' || printf 'scan')" "$APPLY"
     ;;
   caches-only)
+    progress_step "caches"
     _run_caches_phase "$([[ "$APPLY" == "true" ]] && printf 'clean' || printf 'scan')" "$APPLY"
     ;;
   logs-only)
+    progress_step "logs"
     _run_logs_phase "$APPLY"
     ;;
   permissions-only)
+    progress_step "permissions"
     _run_permissions_phase "$APPLY"
     ;;
   brew-only)
+    progress_step "brew"
     _run_brew_phase "brew-only"
     ;;
   startup-only)
+    progress_step "startup"
     _run_startup_phase
     ;;
   disk-only)
+    progress_step "disk"
     _run_disk_phase
     ;;
 
   inventory-only)
+    progress_step "inventory"
     ensure_inventory "scan"
     summary_add "inventory inspected=true ready=${INVENTORY_READY:-false}"
     ;;
@@ -601,5 +866,20 @@ _emit_disk_service_insights
 summary_add "timing startup_s=${STARTUP_DUR_S:-0} launchd_s=${LAUNCHD_DUR_S:-0} bins_s=${BINS_DUR_S:-0} brew_s=${BREW_DUR_S:-0} caches_s=${CACHES_DUR_S:-0} intel_s=${INTEL_DUR_S:-0} inventory_s=${INVENTORY_DUR_S:-0} logs_s=${LOGS_DUR_S:-0} disk_s=${DISK_DUR_S:-0} leftovers_s=${LEFTOVERS_DUR_S:-0} permissions_s=${PERMISSIONS_DUR_S:-0} total_s=$(_elapsed_s "$run_started_s")"
 summary_print
 log "Done."
+
+if [[ "${JSON_OUTPUT}" == "true" ]]; then
+  exec 1>&3
+
+  if [[ "${JSON_STDOUT}" == "true" ]]; then
+    summary_emit_json "${JSON_RECORDS_FILE}"
+  fi
+
+  if [[ -n "${JSON_FILE}" ]]; then
+    summary_emit_json "${JSON_RECORDS_FILE}" > "${JSON_FILE}"
+  fi
+
+  exec 3>&-
+  tmpfile_cleanup "${JSON_RECORDS_FILE}"
+fi
 
 # End of run

@@ -661,6 +661,7 @@ summary__append_set_lines() {
     done
     SUMMARY_MODULE_LINES+=("$line")
   done
+
 }
 
 summary_print() {
@@ -725,6 +726,116 @@ summary_print() {
       log "  - $line"
     done
   fi
+}
+
+# ----------------------------
+# JSON summary (optional)
+# ----------------------------
+
+_json_escape() {
+  # Purpose: escape a string for JSON output (single-line inputs only)
+  # Safety: best-effort; no external dependencies
+  local s="${1:-}"
+  s="${s//\\/\\\\}"
+  s="${s//"/\\"}"
+  s="${s//$'\t'/\\t}"
+  s="${s//$'\r'/\\r}"
+  s="${s//$'\n'/\\n}"
+  printf '%s' "$s"
+}
+
+_json_bool() {
+  case "${1:-}" in
+    1|true|TRUE|yes|YES|y|Y) printf 'true' ;;
+    *) printf 'false' ;;
+  esac
+}
+
+_json_num_or_zero() {
+  local v="${1:-0}"
+  if [[ -z "$v" || ! "$v" =~ ^[0-9]+$ ]]; then
+    printf '0'
+  else
+    printf '%s' "$v"
+  fi
+}
+
+_json_array_from_array() {
+  local -a arr
+  arr=("$@")
+  printf '['
+  local first="true"
+  local item
+  for item in "${arr[@]:-}"; do
+    [[ -n "$item" ]] || continue
+    if [[ "$first" == "true" ]]; then
+      first="false"
+    else
+      printf ','
+    fi
+    printf '"%s"' "$(_json_escape "$item")"
+  done
+  printf ']'
+}
+
+summary_emit_json() {
+  # Purpose: emit a JSON summary to stdout (for --json)
+  # Notes: assumes summary_print has already run to append summary_set lines.
+  local records_file="${1:-}"
+
+  summary__ensure_arrays
+
+  printf '{'
+  printf '"meta":{'
+  printf '"mode":"%s",' "$(_json_escape "${MODE:-}")"
+  printf '"apply":%s,' "$(_json_bool "${APPLY:-false}")"
+  printf '"explain":%s,' "$(_json_bool "${EXPLAIN:-false}")"
+  printf '"startup_system":%s,' "$(_json_bool "${STARTUP_INCLUDE_SYSTEM:-false}")"
+  printf '"backup_dir":"%s",' "$(_json_escape "${BACKUP_DIR:-}")"
+  printf '"thresholds_mb":{'
+  printf '"caches":%s,' "$(_json_num_or_zero "${THRESHOLD_CACHES_MB:-0}")"
+  printf '"logs":%s,' "$(_json_num_or_zero "${THRESHOLD_LOGS_MB:-0}")"
+  printf '"leftovers":%s,' "$(_json_num_or_zero "${THRESHOLD_LEFTOVERS_MB:-0}")"
+  printf '"disk":%s' "$(_json_num_or_zero "${THRESHOLD_DISK_MB:-0}")"
+  printf '},'
+  printf '"json":true'
+  printf '},'
+
+  printf '"privacy":{'
+  printf '"total_services":%s,' "$(_json_num_or_zero "${PRIVACY_TOTAL_SERVICES:-0}")"
+  printf '"unknown_services":%s,' "$(_json_num_or_zero "${PRIVACY_UNKNOWN_SERVICES:-0}")"
+  printf '"network_facing":%s' "$(_json_num_or_zero "${PRIVACY_NETWORK_FACING_SERVICES:-0}")"
+  printf '},'
+
+  printf '"summary":{'
+  printf '"module_lines":'; _json_array_from_array "${SUMMARY_MODULE_LINES[@]:-}"; printf ','
+  printf '"action_lines":'; _json_array_from_array "${SUMMARY_ACTION_LINES[@]:-}"; printf ','
+  printf '"info_lines":'; _json_array_from_array "${SUMMARY_INFO_LINES[@]:-}"; printf ','
+  printf '"legacy_lines":'; _json_array_from_array "${SUMMARY_LINES[@]:-}"
+  printf '},'
+
+  printf '"records":['
+  local first_record="true"
+  if [[ -n "$records_file" && -f "$records_file" ]]; then
+    local line
+    while IFS= read -r line; do
+      [[ -n "$line" ]] || continue
+      local rtype="other"
+      case "$line" in
+        SERVICE\?*) rtype="service" ;;
+        DISK\?*) rtype="disk" ;;
+      esac
+      if [[ "$first_record" == "true" ]]; then
+        first_record="false"
+      else
+        printf ','
+      fi
+      printf '{"type":"%s","raw":"%s"}' "$rtype" "$(_json_escape "$line")"
+    done < "$records_file"
+  fi
+  printf ']'
+
+  printf '}'
 }
 
 # Note: privacy counters are initialized by the entrypoint (mc-leaner.sh) once per run.

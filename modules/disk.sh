@@ -364,12 +364,13 @@ _disk_collect_sizes() {
 # ----------------------------
 run_disk_module() {
   # Contract:
-  #   run_disk_module <mode> <apply> <backup_dir> <explain> [inventory_index_file]
+  #   run_disk_module <mode> <apply> <backup_dir> <explain> [inventory_index_file] [threshold_mb]
   local mode="${1:-scan}"
   local apply="${2:-false}"
   local backup_dir="${3:-}"
   local explain="${4:-false}"
   local inventory_index_file="${5:-}"
+  local threshold_mb="${6:-}"
 
   # Inputs
   local inventory_index_display="<none>"
@@ -395,7 +396,14 @@ run_disk_module() {
     _disk_explain "Disk usage attribution is inspection-only; apply=true is ignored."
   fi
 
-  local min_mb=200
+  if [[ -z "${threshold_mb}" ]]; then
+    threshold_mb="200"
+  fi
+  if ! echo "${threshold_mb}" | grep -Eq '^[0-9]+$'; then
+    log_info "Disk: invalid threshold MB: ${threshold_mb} (expected integer)"
+    return 1
+  fi
+  local min_mb="${threshold_mb}"
   local top_n=20
 
   # Exported module settings for mc-leaner summary integration.

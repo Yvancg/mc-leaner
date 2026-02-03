@@ -14,6 +14,7 @@ mc-leaner guarantees the following:
 
 - The default mode is **dry-run**
 - No files are moved unless `--apply` is explicitly used
+  - `--apply` must be provided on the CLI (config files cannot enable it)
 
 ### 2. No deletion
 
@@ -23,6 +24,8 @@ mc-leaner guarantees the following:
 ### 3. Reversible actions
 
 - Every moved file can be restored manually
+- Built-in restore helpers are available via `--list-backups` and `--restore-backup`
+- Restore uses a checksum-validated manifest to detect tampering
 - A reboot restores normal launchd behavior once files are restored
 
 ### 4. Explicit user consent
@@ -107,6 +110,8 @@ The Intel-only executable report:
 ### Something stopped working
 
 1. Restore the affected files from the backup folder
+   - Use `bash mc-leaner.sh --list-backups`
+   - Then `bash mc-leaner.sh --restore-backup <backup_dir>`
 2. Move them back to their original locations
 3. Reboot
 

@@ -207,9 +207,8 @@ This release strengthens mc-leaner’s inspection guarantees by making all flagg
   - Run summary lists every flagged item per module
   - Output is stable, readable, and automation-friendly
 
-- Simplified execution model
-  - Removed per-module duration tracking
-  - Retained a single end-to-end runtime measurement
+- Timing attribution
+  - Per-module durations included in the end-of-run summary
 
 Status: **released**
 
@@ -261,6 +260,18 @@ Summary: summary normalization, move contract unification, safer attribution, se
 - Per-module timing stabilized so durations survive RETURN traps
 
 Status: **released**
+
+---
+
+## v2.4.0 (in progress)
+
+Focus: **output flexibility and restore safety**
+
+- JSON summary output with `--json-file`
+- Report export (`--export`)
+- Backup management (`--list-backups`, `--restore-backup`) with checksum validation
+- Config file support (`~/.mcleanerrc`) with CLI override precedence
+- Progress indicator (`--progress`)
 
 ---
 

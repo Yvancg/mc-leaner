@@ -37,19 +37,21 @@ If you want to understand what is happening on your system and clean it safely, 
 
 ---
 
-## What mc-leaner does (v2.3.0)
+## What mc-leaner does (current)
 
 mc-leaner inspects macOS systems for:
 
 - Startup and login items (launchd agents, daemons, login items)
-Startup inspection does not disable anything, and system launchd items are opt-in.
+Startup inspection does not disable anything, system launchd items are opt-in, and items include impact seconds.
 - Orphaned or unmanaged launchd plists
-- Large caches and logs
+- Large caches and logs (configurable thresholds)
 - Leftover data from uninstalled applications
 - Large disk consumers with ownership attribution
 - Intel-only executables on Apple Silicon (reporting only)
 - Execution context and permission boundaries
 - Background service visibility records (`SERVICE?`) for correlation
+- JSON summary output and report export
+- Backup management (list and restore with manifest checksum)
 
 All modules are **inspection-only by default**.  
 Cleanup actions require `--apply` and explicit confirmation.
@@ -71,7 +73,7 @@ Cleanup actions require `--apply` and explicit confirmation.
   Every flagged item is listed in the run summary, one per line.
 
 - **Always reversible**  
-  Restore by moving files back and rebooting if needed.
+  Restore with `--restore-backup` (or move files back manually) and reboot if needed.
 
 ---
 
@@ -99,6 +101,15 @@ To run a single module:
 ```bash
 bash mc-leaner.sh --mode startup-only --explain
 bash mc-leaner.sh --mode disk-only
+```
+
+Optional: set defaults in `~/.mcleanerrc` (key=value). CLI flags always win.
+
+To export a report or JSON summary:
+
+```bash
+bash mc-leaner.sh --export ~/Desktop/mc-leaner_report.txt
+bash mc-leaner.sh --json-file ~/Desktop/mc-leaner.json
 ```
 
 To apply cleanup actions (only when you are ready):

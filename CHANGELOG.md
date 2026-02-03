@@ -10,7 +10,29 @@ This project follows a pragmatic versioning scheme:
 
 ---
 
-# 
+## v2.4.0 — Output, restore safety, and configurability
+
+**Release date:** Unreleased
+
+### Added
+
+- JSON output to file (`--json-file`)
+- Report export (`--export`)
+- Backup management (`--list-backups`, `--restore-backup`)
+- Progress indicator (`--progress`)
+- Config file support (`~/.mcleanerrc`)
+
+### Changed
+
+- Thresholds are configurable for caches, logs, leftovers, and disk
+- Startup items include per-item impact seconds (`impact_s`)
+
+### Fixed
+
+- Backup restore now validates manifest checksum
+- Backup manifest entries are safely encoded to avoid parsing issues
+- Config file can no longer enable `--apply` without explicit CLI flag
+
 # ## v2.3.0 — Summary normalization, move contract unification, and safer attribution
 
 **Release date:** 2026-02-02

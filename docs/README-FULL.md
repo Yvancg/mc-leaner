@@ -62,9 +62,20 @@ If you want to understand what is running on your systemâ€”and clean it safelyâ€
 
 ## What mc-leaner does (current)
 
-As of v2.3.0, all modules follow a strict inspection-first contract, share a unified inventory core, and produce explicit, reviewable run summaries.
+As of v2.4.0, all modules follow a strict inspection-first contract, share a unified inventory core, and produce explicit, reviewable run summaries.
 
 ### Release highlights
+
+#### v2.4.0 (unreleased)
+
+**Output, restore safety, and configurability**
+
+- Configurable thresholds for caches/logs/leftovers/disk (CLI + config file)
+- JSON summary output with optional `--json-file`
+- Report export with `--export`
+- Backup management (`--list-backups`, `--restore-backup`) with checksum validation
+- Progress indicator (`--progress`)
+- Startup items include `impact_s` (seconds estimate)
 
 #### v2.3.0
 
@@ -370,7 +381,7 @@ Counts are no longer detached from the underlying items.
    You decide which modules run.
 
 5. **Always reversible**  
-   Restore by moving files back and rebooting.
+   Restore with `--restore-backup` (or move files back manually) and reboot.
 
 ---
 
@@ -389,7 +400,8 @@ Counts are no longer detached from the underlying items.
 mc-leaner uses a small set of global flags that apply consistently across all modules.
 
 - `--apply`  
-  Enables file relocation. Without this flag, mc-leaner runs in **dry-run mode** and performs no changes.
+  Enables file relocation. Without this flag, mc-leaner runs in **dry-run mode** and performs no changes.  
+  **Note:** `--apply` must be explicitly provided on the CLI (config files cannot enable it).
 
 - `--explain`  
   Shows detailed reasoning for why items are flagged or skipped. Strongly recommended before applying any changes.
@@ -404,8 +416,52 @@ mc-leaner uses a small set of global flags that apply consistently across all mo
 - `--mode startup-only`  
   Runs startup inspection module only (inspection-first, no cleanup).
 
+- `--threshold <list>`  
+  Comma list of thresholds (MB). Example: `caches=300,logs=100,leftovers=75,disk=500`.
+
+- `--threshold-caches <mb>` / `--threshold-logs <mb>` / `--threshold-leftovers <mb>` / `--threshold-disk <mb>`  
+  Override per-module thresholds (MB).
+
+- `--json`  
+  Emit a JSON summary to stdout (captures machine records).
+
+- `--json-file <path>`  
+  Write the JSON summary to a separate file.
+
+- `--export <path>`  
+  Write a full report to a file (human logs + machine records).
+
+- `--list-backups`  
+  List backup folders created on this machine.
+
+- `--restore-backup <path>`  
+  Restore items from a backup folder (uses checksum-validated manifest; prompts per item).
+
+- `--progress`  
+  Emit a simple progress indicator per module.
+
 **Important:**  
 If mc-leaner cannot prompt for confirmation (non-interactive run), cleanup actions are skipped automatically for safety.
+
+---
+
+## Config file (~/.mcleanerrc)
+
+mc-leaner reads a simple key=value config file at `~/.mcleanerrc` before CLI parsing. CLI flags always win.
+
+Example:
+
+```ini
+mode=scan
+explain=true
+threshold=caches=300,logs=100
+json=true
+json_file=~/Desktop/mc-leaner.json
+export=~/Desktop/mc-leaner_report.txt
+progress=true
+```
+
+**Safety note:** `apply=true` in the config is ignored unless you also pass `--apply` on the CLI.
 
 ---
 
@@ -449,10 +505,20 @@ Follow this flow to stay safe and avoid surprises.
   bash mc-leaner.sh --mode leftovers-only --explain
   bash mc-leaner.sh --mode brew-only --explain
   bash mc-leaner.sh --mode permissions-only --explain
-  bash mc-leaner.sh --mode intel-only
+  bash mc-leaner.sh --mode report
   ```
 
-  **Note:** `intel-only` is a reporting-only mode. It never performs cleanup actions and does not support `--apply`.
+  Optional helpers:
+
+  ```bash
+  bash mc-leaner.sh --threshold caches=300,logs=100
+  bash mc-leaner.sh --json
+  bash mc-leaner.sh --json-file ~/Desktop/mc-leaner.json
+  bash mc-leaner.sh --export ~/Desktop/mc-leaner_report.txt
+  bash mc-leaner.sh --progress
+  ```
+
+  **Note:** `report` is reporting-only. It never performs cleanup actions and does not support `--apply`.
 
 5. Apply moves only when you are ready
 
@@ -464,9 +530,11 @@ Follow this flow to stay safe and avoid surprises.
 
 6. Restore if needed
 
-- Open the backup folder created on your Desktop
-- Move items back to their original location
+- List backups: `bash mc-leaner.sh --list-backups`
+- Restore: `bash mc-leaner.sh --restore-backup <backup_dir>`
 - Reboot if the item relates to launchd or system services
+
+Restore uses a checksum-validated manifest; if the checksum is missing, restore manually by moving files back.
 
 **Notes:**
 
@@ -530,7 +598,7 @@ Planned directions:
 - UX and safety improvements
   - Clearer non-interactive behavior reporting
   - Improved summaries and decision transparency
-  - Optional machine-readable report output (JSON)
+  - JSON schema stabilization and report file ergonomics
 
 - Documentation and governance
   - Expanded FAQ with real-world scenarios

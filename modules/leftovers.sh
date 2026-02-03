@@ -7,7 +7,7 @@
 # ----------------------------
 # Contract
 # ----------------------------
-# - Entry point: run_leftovers_module <apply> <backup_dir> [explain] [inventory_file] [inventory_index_file]
+# - Entry point: run_leftovers_module <apply> <backup_dir> [explain] [inventory_file] [inventory_index_file] [threshold_mb]
 # - Prefer false negatives over false positives.
 #
 # ----------------------------
@@ -251,9 +251,10 @@ run_leftovers_module() {
   local explain="${3:-false}"
   local inventory_file="${4:-}"
   local inventory_index_file="${5:-${INVENTORY_INDEX_FILE:-}}"
+  local threshold_mb="${6:-}"
 
   # Inputs
-  log "Leftovers: apply=${apply} backup_dir=${backup_dir} explain=${explain} inventory_file=${inventory_file:-<none>} inventory_index=${inventory_index_file:-<none>}"
+  log "Leftovers: apply=${apply} backup_dir=${backup_dir} explain=${explain} inventory_file=${inventory_file:-<none>} inventory_index=${inventory_index_file:-<none>} threshold_mb=${threshold_mb:-<none>}"
 
   # Timing (best-effort wall clock duration for this module).
   local _leftovers_t0="" _leftovers_t1=""
@@ -367,7 +368,15 @@ run_leftovers_module() {
   targets+=("$HOME/Library/Saved Application State")
   targets+=("$HOME/Library/Preferences")
 
-  local min_mb=50
+  if [[ -z "${threshold_mb}" ]]; then
+    threshold_mb="50"
+  fi
+  if ! echo "${threshold_mb}" | grep -Eq '^[0-9]+$'; then
+    log "Leftovers: invalid threshold MB: ${threshold_mb} (expected integer)"
+    _leftovers_summary_emit
+    return 1
+  fi
+  local min_mb="${threshold_mb}"
   local found_any="false"
 
   # Scan each target directory if it exists.

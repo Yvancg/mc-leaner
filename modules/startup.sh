@@ -26,7 +26,7 @@ trap '' PIPE
 # Safety: inspection-only. `mode=clean` and `apply=true` still scan only.
 #
 # Item format:
-#   STARTUP? <timing> | source: <source> | owner: <owner> | conf: <conf> | impact: <impact> | label: <label> | exec: <exec>
+#   STARTUP? <timing> | source: <source> | owner: <owner> | conf: <conf> | impact: <impact> | impact_s: <sec> | label: <label> | exec: <exec>
 #
 # Exports (for RUN SUMMARY):
 #   STARTUP_CHECKED_COUNT
@@ -431,12 +431,38 @@ _startup_infer_impact() {
   echo "${impact}"
 }
 
+_startup_estimate_seconds() {
+  # Best-effort seconds estimate based on timing + impact.
+  # Output: integer seconds as a string.
+  local timing="$1" impact="$2"
+
+  case "${timing}" in
+    boot)
+      case "${impact}" in
+        high) echo "6" ;;
+        medium) echo "3" ;;
+        low|*) echo "1" ;;
+      esac
+      ;;
+    login)
+      case "${impact}" in
+        high) echo "4" ;;
+        medium) echo "2" ;;
+        low|*) echo "1" ;;
+      esac
+      ;;
+    on-demand|*)
+      echo "0"
+      ;;
+  esac
+}
+
 # ----------------------------
 # Output
 # ----------------------------
 _startup_emit_item() {
-  # Inputs: explain timing source label exec_path owner how conf impact
-  local explain="$1" timing="$2" source="$3" label="$4" exec_path="$5" owner="$6" how="$7" conf="$8" impact="$9"
+  # Inputs: explain timing source label exec_path owner how conf impact impact_s
+  local explain="$1" timing="$2" source="$3" label="$4" exec_path="$5" owner="$6" how="$7" conf="$8" impact="$9" impact_s="${10:-}"
 
   if [[ -z "${exec_path}" ]]; then
     exec_path="-"
@@ -446,8 +472,12 @@ _startup_emit_item() {
     impact="low"
   fi
 
-  log "STARTUP? ${timing} | source: ${source} | owner: ${owner} | conf: ${conf} | impact: ${impact} | label: ${label} | exec: ${exec_path}"
-  _startup_explain "${explain}" "Startup item | timing=${timing} | source=${source} | label=${label} | exec=${exec_path} | attribution=${how} | confidence=${conf}"
+  if [[ -z "${impact_s}" ]]; then
+    impact_s="0"
+  fi
+
+  log "STARTUP? ${timing} | source: ${source} | owner: ${owner} | conf: ${conf} | impact: ${impact} | impact_s: ${impact_s} | label: ${label} | exec: ${exec_path}"
+  _startup_explain "${explain}" "Startup item | timing=${timing} | source=${source} | label=${label} | exec=${exec_path} | attribution=${how} | confidence=${conf} | impact_s=${impact_s}"
 }
 
 # ----------------------------
@@ -517,9 +547,11 @@ _startup_scan_launchd_dir() {
     conf="${owner_meta##*|}"
 
     local impact=""
+    local impact_s=""
     impact="$(_startup_infer_impact "${timing}" "${label}" "${exec_path}" "${owner}" "${conf}")"
+    impact_s="$(_startup_estimate_seconds "${timing}" "${impact}")"
 
-    _startup_emit_item "${explain}" "${timing}" "${source}" "${label}" "${exec_path}" "${owner}" "${how}" "${conf}" "${impact}"
+    _startup_emit_item "${explain}" "${timing}" "${source}" "${label}" "${exec_path}" "${owner}" "${how}" "${conf}" "${impact}" "${impact_s}"
 
     # Emit SERVICE? v2.3.0 contract-lock record (shared emitter: scope persistence owner network_facing label)
     service_emit_record "${scope}" "${timing}" "${owner}" "" "${label}"
@@ -610,9 +642,11 @@ APPLESCRIPT
     fi
 
     local impact=""
+    local impact_s=""
     impact="$(_startup_infer_impact "${timing}" "${label}" "${exec_path}" "${owner}" "${conf}")"
+    impact_s="$(_startup_estimate_seconds "${timing}" "${impact}")"
 
-    _startup_emit_item "${explain}" "${timing}" "LoginItem" "${label}" "${exec_path}" "${owner}" "${how}" "${conf}" "${impact}"
+    _startup_emit_item "${explain}" "${timing}" "LoginItem" "${label}" "${exec_path}" "${owner}" "${how}" "${conf}" "${impact}" "${impact_s}"
 
     # Emit SERVICE? v2.3.0 contract-lock record for login items (shared emitter: scope persistence owner network_facing label)
     service_emit_record "user" "login" "${owner}" "" "${label}"

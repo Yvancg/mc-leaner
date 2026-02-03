@@ -70,6 +70,69 @@ safe_move() {
 }
 
 # ----------------------------
+# Backup manifest
+# ----------------------------
+
+backup_manifest_path() {
+  # Purpose: return manifest path for a backup directory
+  local backup_dir="$1"
+  [[ -n "$backup_dir" ]] || return 1
+  printf '%s/.mcleaner_manifest.tsv' "$backup_dir"
+}
+
+backup_manifest_checksum_path() {
+  # Purpose: return checksum path for a backup directory
+  local backup_dir="$1"
+  [[ -n "$backup_dir" ]] || return 1
+  printf '%s/.mcleaner_manifest.sha256' "$backup_dir"
+}
+
+backup_manifest_checksum_update() {
+  # Purpose: update checksum file for the manifest (best-effort)
+  local backup_dir="$1"
+  local manifest
+  manifest="$(backup_manifest_path "$backup_dir")" || return 1
+  [[ -f "$manifest" ]] || return 1
+
+  local checksum
+  checksum="$(/usr/bin/shasum -a 256 "$manifest" 2>/dev/null | awk '{print $1}')"
+  [[ -n "$checksum" ]] || return 1
+
+  local checksum_file
+  checksum_file="$(backup_manifest_checksum_path "$backup_dir")" || return 1
+  printf '%s\n' "$checksum" > "$checksum_file" 2>/dev/null || return 1
+  return 0
+}
+
+backup_manifest_append() {
+  # Purpose: record a move in the backup manifest (best-effort)
+  local src="$1"
+  local dest="$2"
+  local backup_dir="$3"
+
+  [[ -n "$backup_dir" && -n "$src" && -n "$dest" ]] || return 0
+
+  local manifest
+  manifest="$(backup_manifest_path "$backup_dir")" || return 0
+
+  local ts
+  ts="$(/bin/date +%s 2>/dev/null || echo "")"
+
+  local src_b64 dest_b64
+  src_b64="$(printf '%s' "$src" | /usr/bin/base64 2>/dev/null | tr -d '\n')"
+  dest_b64="$(printf '%s' "$dest" | /usr/bin/base64 2>/dev/null | tr -d '\n')"
+
+  [[ -n "$src_b64" && -n "$dest_b64" ]] || return 0
+
+  # Format: epoch<TAB>src_b64<TAB>dest_b64
+  {
+    printf '%s\t%s\t%s\n' "$ts" "$src_b64" "$dest_b64"
+  } >> "$manifest" 2>/dev/null || true
+
+  backup_manifest_checksum_update "$backup_dir" || true
+}
+
+# ----------------------------
 # Move attempt contract
 # ----------------------------
 
@@ -129,7 +192,61 @@ move_attempt() {
   MOVE_LAST_STATUS="moved"
   MOVE_LAST_DEST="$out"
   MOVE_LAST_MESSAGE="moved"
+
+  backup_manifest_append "$src" "$out" "$backup_dir"
   return 0
+}
+
+# ----------------------------
+# Restore
+# ----------------------------
+
+safe_restore() {
+  # Purpose: move a path from backup to its original location
+  # Safety: never overwrites existing paths; uses sudo only when required.
+  # Output: echoes destination path on success.
+  local backup_path="$1"
+  local restore_path="$2"
+
+  [[ -e "$backup_path" ]] || return 1
+  [[ -n "$restore_path" ]] || return 1
+
+  if [[ -e "$restore_path" ]]; then
+    echo "restore target exists" >&2
+    return 1
+  fi
+
+  local parent
+  parent="$(dirname "$restore_path")"
+
+  if [[ ! -d "$parent" ]]; then
+    if ! mkdir -p "$parent" 2>/dev/null; then
+      sudo mkdir -p "$parent" 2>/dev/null || true
+    fi
+  fi
+
+  local err rc
+  err=""
+  set +e
+  if [[ -w "$parent" ]]; then
+    err="$(mv "$backup_path" "$restore_path" 2>&1)"
+    rc=$?
+  else
+    err="$(sudo mv "$backup_path" "$restore_path" 2>&1)"
+    rc=$?
+  fi
+  set -e
+
+  if [[ $rc -ne 0 ]]; then
+    if [[ -w "$parent" ]] && { [[ "$err" == *"Operation not permitted"* ]] || [[ "$err" == *"Permission denied"* ]]; }; then
+      sudo mv "$backup_path" "$restore_path"
+    else
+      echo "$err" >&2
+      return $rc
+    fi
+  fi
+
+  echo "$restore_path"
 }
 
 # ----------------------------

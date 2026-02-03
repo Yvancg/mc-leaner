@@ -32,12 +32,13 @@ fi
 # ----------------------------
 run_caches_module() {
   # Contract:
-  #   run_caches_module <mode> <apply> <backup_dir> <explain> [inventory_index_file]
+  #   run_caches_module <mode> <apply> <backup_dir> <explain> [inventory_index_file] [threshold_mb]
   local mode="${1:-scan}"        # scan|clean
   local apply="${2:-false}"      # true|false
   local backup_dir="${3:-}"
   local explain="${4:-false}"
   local inventory_index_file="${5:-}"
+  local threshold_mb="${6:-}"
 
   # Inputs
   # Never leak raw temp paths in logs. Only show a basename (or a stable pattern) when --explain is enabled.
@@ -174,7 +175,14 @@ run_caches_module() {
   # ----------------------------
   # Scan Configuration
   # ----------------------------
-  local min_mb=200  # TODO: make configurable via CLI when the interface stabilizes
+  if [[ -z "${threshold_mb}" ]]; then
+    threshold_mb="200"
+  fi
+  if ! echo "${threshold_mb}" | grep -Eq '^[0-9]+$'; then
+    log "Caches: invalid threshold MB: ${threshold_mb} (expected integer)"
+    return 1
+  fi
+  local min_mb="${threshold_mb}"
 
   log "Caches: scanning user-level cache locations (min ${min_mb}MB)..."
 

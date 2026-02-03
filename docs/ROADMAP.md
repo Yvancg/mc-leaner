@@ -263,7 +263,7 @@ Status: **released**
 
 ---
 
-## v2.4.0 (in progress)
+## v2.4.0 (released)
 
 Focus: **output flexibility and restore safety**
 

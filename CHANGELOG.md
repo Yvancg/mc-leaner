@@ -12,7 +12,7 @@ This project follows a pragmatic versioning scheme:
 
 ## v2.4.0 — Output, restore safety, and configurability
 
-**Release date:** Unreleased
+**Release date:** 2026-02-03
 
 ### Added
 

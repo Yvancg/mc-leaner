@@ -117,6 +117,7 @@ To apply cleanup actions (only when you are ready):
 
 ```bash
 bash mc-leaner.sh --mode leftovers-only --apply
+bash mc-leaner.sh --mode clean --apply
 ```
 
 You will be prompted per item.

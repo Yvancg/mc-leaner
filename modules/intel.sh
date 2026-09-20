@@ -22,6 +22,8 @@ run_intel_report() {
   # Exported counters for end-of-run summary consumption (stable contract even when empty).
   INTEL_FLAGGED_IDS_LIST=""
   INTEL_FLAGGED_COUNT="0"
+  INTEL_REPORT_WRITTEN="false"
+  INTEL_REPORT_PATH=""
 
   # Module timing (seconds). Used by the end-of-run timing summary.
   local _intel_t0=""
@@ -53,7 +55,13 @@ run_intel_report() {
   # ----------------------------
   # Report Destination
   # ----------------------------
-  local out="$HOME/Desktop/intel_binaries.txt"
+  # Findings always use a temporary report internally. Persistence only occurs
+  # when the caller explicitly supplies --intel-report.
+  local requested_out="${2:-${INTEL_REPORT_FILE:-}}"
+  local out
+  out="$(tmpfile)"
+  : > "$out" 2>/dev/null || return 1
+  _intel_tmpfiles+=("$out")
 
   # ----------------------------
   # Scan Roots
@@ -208,6 +216,31 @@ run_intel_report() {
     : > "$out" 2>/dev/null || true
   fi
 
+  if [[ -n "$requested_out" ]]; then
+    if [[ -L "$requested_out" || -d "$requested_out" ]]; then
+      log "Intel: refusing unsafe report path: $requested_out"
+      return 1
+    fi
+
+    local report_dir report_tmp
+    report_dir="$(dirname "$requested_out")"
+    [[ -d "$report_dir" ]] || {
+      log "Intel: report directory does not exist: $report_dir"
+      return 1
+    }
+    report_tmp="$(/usr/bin/mktemp "${report_dir}/.mcleaner-intel.XXXXXX" 2>/dev/null)" || {
+      log "Intel: cannot create report in: $report_dir"
+      return 1
+    }
+    _intel_tmpfiles+=("$report_tmp")
+    if ! cp "$out" "$report_tmp" 2>/dev/null || ! /bin/mv "$report_tmp" "$requested_out" 2>/dev/null; then
+      log "Intel: cannot write report: $requested_out"
+      return 1
+    fi
+    INTEL_REPORT_WRITTEN="true"
+    INTEL_REPORT_PATH="$requested_out"
+  fi
+
   # ----------------------------
   # Final Counts (Authoritative)
   # ----------------------------
@@ -236,16 +269,24 @@ run_intel_report() {
 
   if [[ "$unique_files" -eq 0 ]]; then
     log "Intel: no x86_64 Mach-O executables found (by heuristics)."
-    log "Intel: report written to: $out"
+    if [[ "$INTEL_REPORT_WRITTEN" == "true" ]]; then
+      log "Intel: report written to: $INTEL_REPORT_PATH"
+    else
+      log "Intel: report not persisted (use --intel-report <path> to save it)"
+    fi
     log "Intel: flagged items: none"
-    summary_add "intel" "flagged=0 report=${out}"
+    summary_add "intel" "flagged=0 report_written=${INTEL_REPORT_WRITTEN}"
     INTEL_FLAGGED_COUNT="0"
     INTEL_DUR_S="${INTEL_DUR_S:-0}"
     return 0
   fi
 
   log "Intel: found ${unique_files} Intel-only executable(s) (report lines: ${report_lines})."
-  log "Intel: full list written to: $out"
+  if [[ "$INTEL_REPORT_WRITTEN" == "true" ]]; then
+    log "Intel: full list written to: $INTEL_REPORT_PATH"
+  else
+    log "Intel: report not persisted (use --intel-report <path> to save it)"
+  fi
 
   log "Intel: top sources (top ${preview_limit}):"
 
@@ -298,7 +339,11 @@ run_intel_report() {
       done
 
   if [[ "$unique_files" -gt "$preview_limit" ]]; then
-    log "Intel: (${unique_files} total) See full list for remaining items: $out"
+    if [[ "$INTEL_REPORT_WRITTEN" == "true" ]]; then
+      log "Intel: (${unique_files} total) See full list for remaining items: $INTEL_REPORT_PATH"
+    else
+      log "Intel: (${unique_files} total) use --intel-report <path> to save the full list"
+    fi
   fi
 
   # ----------------------------
@@ -329,9 +374,9 @@ run_intel_report() {
   INTEL_DUR_S="${INTEL_DUR_S:-0}"
 
   if [[ "$unique_files" -eq 0 ]]; then
-    summary_add "intel" "flagged=0 report=${out}"
+    summary_add "intel" "flagged=0 report_written=${INTEL_REPORT_WRITTEN}"
   else
-    summary_add "intel" "flagged=${unique_files} report_lines=${report_lines} report=${out}"
+    summary_add "intel" "flagged=${unique_files} report_lines=${report_lines} report_written=${INTEL_REPORT_WRITTEN} report=${INTEL_REPORT_PATH:-none}"
   fi
 }
 

@@ -301,7 +301,7 @@ verify_backup() {
     else
       decoded="$dest_field"
     fi
-    if [[ -z "$decoded" || ! -e "$decoded" ]]; then
+    if [[ -z "$decoded" || ( ! -e "$decoded" && ! -L "$decoded" ) ]]; then
       missing=$((missing + 1))
     fi
   done < "$manifest"
@@ -311,6 +311,10 @@ verify_backup() {
   log "Verify: format=${manifest_format}"
   log "Verify: checksum=${checksum_state}"
   log "Verify: entries=${total} missing_in_backup=${missing}"
+
+  if [[ "$missing" -gt 0 ]]; then
+    return "${EXIT_SAFETY:-5}"
+  fi
 
   case "${checksum_state}" in
     ok)
@@ -401,7 +405,7 @@ restore_backup() {
   local skipped=0
   local failed=0
 
-  while IFS=$'\t' read -r ts src_field dest_field; do
+  while IFS=$'\t' read -r ts src_field dest_field <&4; do
     [[ -n "$src_field" && -n "$dest_field" ]] || continue
 
     local src dest
@@ -416,8 +420,8 @@ restore_backup() {
 
     local dest_real
     dest_real="$dest"
-    if declare -F fs_resolve_symlink_target_physical >/dev/null 2>&1; then
-      dest_real="$(fs_resolve_symlink_target_physical "$dest" 2>/dev/null || true)"
+    if declare -F fs_physical_entry_path >/dev/null 2>&1; then
+      dest_real="$(fs_physical_entry_path "$dest" 2>/dev/null || true)"
       [[ -n "$dest_real" ]] || dest_real="$dest"
     fi
 
@@ -430,19 +434,19 @@ restore_backup() {
         ;;
     esac
 
-    if [[ ! -e "$dest" ]]; then
+    if [[ ! -e "$dest" && ! -L "$dest" ]]; then
       log "Restore: skip (missing in backup): ${dest}"
       skipped=$((skipped + 1))
       continue
     fi
 
-    if [[ -e "$src" ]]; then
+    if [[ -e "$src" || -L "$src" ]]; then
       log "Restore: skip (target exists): ${src}"
       skipped=$((skipped + 1))
       continue
     fi
 
-    if ask_yes_no "Restore this item?\n${src}\n<-${dest}"; then
+    if ask_yes_no $'Restore this item?\n'"${src}"$'\n<- '"${dest}"; then
       local restore_out
       if restore_out="$(safe_restore "$dest" "$src" 2>&1)"; then
         log "Restored: ${dest} -> ${restore_out}"
@@ -454,7 +458,7 @@ restore_backup() {
     else
       skipped=$((skipped + 1))
     fi
-  done < "$manifest"
+  done 4< "$manifest"
 
   log "Restore: completed restored=${restored} skipped=${skipped} failed=${failed}"
   if [[ "${failed}" -gt 0 ]]; then
@@ -531,6 +535,20 @@ if [[ -n "${JSON_FILE}" ]]; then
     exit "${EXIT_IO:-4}"
   fi
   : > "${JSON_FILE}" 2>/dev/null || { log_error "JSON: cannot write to ${JSON_FILE}"; exit "${EXIT_IO:-4}"; }
+fi
+
+# ----------------------------
+# Intel report output (optional)
+# ----------------------------
+INTEL_REPORT_FILE="${INTEL_REPORT_FILE:-}"
+if [[ -n "$INTEL_REPORT_FILE" ]]; then
+  INTEL_REPORT_FILE="$(_expand_user_path "$INTEL_REPORT_FILE")"
+  intel_report_dir="$(dirname "$INTEL_REPORT_FILE")"
+  mkdir -p "$intel_report_dir" 2>/dev/null || true
+  if [[ ! -d "$intel_report_dir" || -L "$INTEL_REPORT_FILE" || -d "$INTEL_REPORT_FILE" ]]; then
+    log_error "Intel: unsafe or unavailable report path: $INTEL_REPORT_FILE"
+    exit "${EXIT_IO:-4}"
+  fi
 fi
 
 # ----------------------------
@@ -872,8 +890,7 @@ _run_leftovers_phase() {
 }
 
 _run_intel_phase() {
-  run_intel_report
-  summary_add "intel report_written=true"
+  run_intel_report "$EXPLAIN" "$INTEL_REPORT_FILE"
 }
 
 # ----------------------------

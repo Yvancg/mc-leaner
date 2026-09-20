@@ -464,6 +464,11 @@ run_launchd_module() {
       # NOTE: only plists with a missing program path are treated as orphans; confirmation is still required.
       # SAFETY: move only in clean mode with --apply and per-item confirmation.
       if [[ "$mode" == "clean" && "$apply" == "true" ]]; then
+        if [[ "$scope" == "system" ]]; then
+          log "SKIP (system report-only): $plist_path"
+          explain_log "  reason: system launchd definitions are never relocated"
+          continue
+        fi
         if ask_yes_no "Orphaned launch item detected:\n$plist_path\n\nMove to backup folder?"; then
           # Move contract: move_attempt populates MOVE_LAST_* fields.
           local move_out=""

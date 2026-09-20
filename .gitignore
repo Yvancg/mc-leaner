@@ -2,4 +2,4 @@
 *.log
 /tmp/
 intel_binaries.txt
-Orphaned_Backups_*/
+McLeaner_Backups_*/

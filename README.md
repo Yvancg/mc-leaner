@@ -68,7 +68,10 @@ Cleanup actions require `--apply` and explicit confirmation.
   Files are moved to a timestamped backup folder, never deleted.
 
 - **Hard protection rules**  
-  Known security and endpoint software is always skipped.
+  Known security and endpoint software paths are checked again immediately before every move.
+
+- **System paths are report-only**
+  Launchd definitions and logs under system locations are never relocated.
 
 - **Explicit transparency**  
   Every flagged item is listed in the run summary, one per line.
@@ -111,6 +114,12 @@ To export a report or JSON summary:
 ```bash
 bash mc-leaner.sh --export ~/Desktop/mc-leaner_report.txt
 bash mc-leaner.sh --json-file ~/Desktop/mc-leaner.json
+```
+
+The Intel-only executable scan does not create a file unless a destination is explicitly requested:
+
+```bash
+bash mc-leaner.sh --mode report --intel-report ~/Desktop/intel_binaries.txt
 ```
 
 To apply cleanup actions (only when you are ready):

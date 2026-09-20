@@ -25,6 +25,7 @@
 ask_yes_no() {
   local msg="$1"
   local allow_gui="${GUI_PROMPTS:-auto}"
+  local tty_path="${UI_TTY_PATH:-/dev/tty}"
   local prompt_in=""
   local prompt_out=""
 
@@ -33,7 +34,7 @@ ask_yes_no() {
     # SAFETY: pass the message as an argument to avoid quote/escape issues.
     osascript \
       -e 'on run argv' \
-      -e 'display dialog (item 1 of argv) buttons {"Cancel", "OK"} default button "OK"' \
+      -e 'display dialog (item 1 of argv) buttons {"Cancel", "Move"} default button "Cancel" cancel button "Cancel"' \
       -e 'end run' \
       -- "$msg" \
       >/dev/null 2>&1
@@ -41,14 +42,14 @@ ask_yes_no() {
   fi
 
   # Terminal fallback: default to "No" on empty input
-  if [[ -r /dev/tty ]]; then
-    prompt_in="/dev/tty"
+  if [[ -r "$tty_path" ]]; then
+    prompt_in="$tty_path"
   else
     prompt_in="/dev/stdin"
   fi
 
-  if [[ -w /dev/tty ]]; then
-    prompt_out="/dev/tty"
+  if [[ -w "$tty_path" ]]; then
+    prompt_out="$tty_path"
   else
     prompt_out="/dev/stderr"
   fi

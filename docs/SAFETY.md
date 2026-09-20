@@ -24,9 +24,10 @@ mc-leaner guarantees the following:
 
 ### 3. Reversible actions
 
-- Every moved file can be restored manually
+- Every successfully recorded move can be restored manually
 - Built-in restore helpers are available via `--list-backups` and `--restore-backup`
-- Restore uses a checksum-validated manifest to detect tampering
+- If a move cannot be recorded, mc-leaner immediately attempts to roll it back and reports the backup location if rollback also fails
+- Restore uses a checksum-validated manifest to detect accidental corruption
 - A reboot restores normal launchd behavior once files are restored
 
 ### 4. Explicit user consent
@@ -62,10 +63,18 @@ Examples include (non-exhaustive):
 
 These services may not have visible app bundles and removing them can break system security.
 
+The protection check is case-insensitive and runs again at the shared move boundary, regardless of which module requested the move.
+
 ### Homebrew-managed services
 
 - Launchd labels matching `homebrew.mxcl.*` are skipped by default
 - These services should be managed via Homebrew, not manually
+
+### System launchd definitions and logs
+
+- `/Library/LaunchAgents` and `/Library/LaunchDaemons` are report-only
+- `/Library/Logs` and `/var/log` are report-only
+- These paths are rejected by the shared move boundary even if a module-level check regresses
 
 ---
 

@@ -18,7 +18,9 @@ if ! command -v shellcheck >/dev/null 2>&1; then
   fi
 fi
 
-shellcheck -x -e SC1091,SC2034,SC2329 mc-leaner.sh lib/*.sh modules/*.sh
+shellcheck -x -e SC1091,SC2034,SC2329 mc-leaner.sh lib/*.sh modules/*.sh scripts/*.sh tests/*.sh
+/bin/bash -n mc-leaner.sh lib/*.sh modules/*.sh scripts/*.sh tests/*.sh
+/bin/bash tests/run.sh
 
 expected_version="$(head -n 1 VERSION 2>/dev/null | tr -d '[:space:]')"
 actual_version="$(bash mc-leaner.sh --version | tr -d '[:space:]')"

@@ -32,6 +32,16 @@ This project follows a pragmatic versioning scheme:
 ### Fixed
 
 - Legacy backup restore can proceed with explicit acknowledgement
+- Default scans no longer create or overwrite `~/Desktop/intel_binaries.txt`; use `--intel-report` to persist it
+- Backup moves use collision-proof destinations and attempt immediate rollback when manifest recording fails
+- GUI move confirmations default to Cancel
+- Security-product checks are case-insensitive and enforced at the shared move boundary
+- System launchd definitions and logs are report-only
+- Backup verification now fails when a manifest payload is missing
+
+### Tests
+
+- Added Bash 3.2-compatible regression tests for move/restore safety, prompts, protected paths, and Intel report output
 
 ## v2.4.0 — Output, restore safety, and configurability
 

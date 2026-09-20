@@ -26,6 +26,7 @@ JSON_OUTPUT="false"
 JSON_STDOUT="false"
 JSON_FILE=""
 EXPORT_FILE=""
+INTEL_REPORT_FILE=""
 LIST_BACKUPS="false"
 RESTORE_BACKUP_DIR=""
 VERIFY_BACKUP_DIR=""
@@ -62,7 +63,7 @@ usage() {
 mc-leaner — inspection-first system hygiene with explicit run summaries
 
 Usage:
-  bash mc-leaner.sh [--mode <mode>] [--apply] [--backup-dir <path>] [--explain] [--startup-system] [--json] [--json-file <path>] [--export <path>]
+  bash mc-leaner.sh [--mode <mode>] [--apply] [--backup-dir <path>] [--explain] [--startup-system] [--json] [--json-file <path>] [--export <path>] [--intel-report <path>]
                    [--list-backups] [--restore-backup <path>] [--verify-backup <path>]
                    [--progress] [--allow-sudo] [--no-gui|--gui] [--quiet]
                    [--threshold <list>] [--threshold-caches <mb>] [--threshold-logs <mb>]
@@ -88,6 +89,7 @@ Options:
   --json          Emit a JSON summary to stdout (captures machine records)
   --json-file     Write JSON summary to a file (separate from --export)
   --export        Write a full report to a file (human logs + machine records)
+  --intel-report  Persist Intel-only executable findings to the requested path
   --list-backups  List backup folders created on this machine
   --restore-backup
                   Restore items from a backup folder (uses manifest; prompts per item)
@@ -109,6 +111,7 @@ Examples:
   bash mc-leaner.sh
   bash mc-leaner.sh --mode clean --apply
   bash mc-leaner.sh --mode report
+  bash mc-leaner.sh --mode report --intel-report ~/Desktop/intel_binaries.txt
   bash mc-leaner.sh --mode inventory-only
   bash mc-leaner.sh --mode startup-only
   bash mc-leaner.sh --mode disk-only
@@ -144,27 +147,28 @@ parse_args() {
         printf '%s\n' "${MCLEANER_VERSION:-unknown}"
         exit "${EXIT_OK:-0}"
         ;;
-      --mode) MODE="${2:-}"; shift 2 ;;
+      --mode) _cli_require_value "$1" "${2:-}" "$#"; MODE="$2"; shift 2 ;;
       --apply) APPLY="true"; APPLY_SET="true"; shift ;;
-      --backup-dir) BACKUP_DIR="${2:-}"; shift 2 ;;
+      --backup-dir) _cli_require_value "$1" "${2:-}" "$#"; BACKUP_DIR="$2"; shift 2 ;;
       --explain) EXPLAIN="true"; shift ;;
       --startup-system) STARTUP_INCLUDE_SYSTEM="true"; shift ;;
       --json) JSON_STDOUT="true"; JSON_OUTPUT="true"; shift ;;
-      --json-file) JSON_FILE="${2:-}"; JSON_OUTPUT="true"; shift 2 ;;
-      --export) EXPORT_FILE="${2:-}"; shift 2 ;;
+      --json-file) _cli_require_value "$1" "${2:-}" "$#"; JSON_FILE="$2"; JSON_OUTPUT="true"; shift 2 ;;
+      --export) _cli_require_value "$1" "${2:-}" "$#"; EXPORT_FILE="$2"; shift 2 ;;
+      --intel-report) _cli_require_value "$1" "${2:-}" "$#"; INTEL_REPORT_FILE="$2"; shift 2 ;;
       --list-backups) LIST_BACKUPS="true"; shift ;;
-      --restore-backup) RESTORE_BACKUP_DIR="${2:-}"; shift 2 ;;
-      --verify-backup) VERIFY_BACKUP_DIR="${2:-}"; shift 2 ;;
+      --restore-backup) _cli_require_value "$1" "${2:-}" "$#"; RESTORE_BACKUP_DIR="$2"; shift 2 ;;
+      --verify-backup) _cli_require_value "$1" "${2:-}" "$#"; VERIFY_BACKUP_DIR="$2"; shift 2 ;;
       --progress) PROGRESS="true"; shift ;;
       --allow-sudo) ALLOW_SUDO="true"; shift ;;
       --no-gui) GUI_PROMPTS="false"; shift ;;
       --gui) GUI_PROMPTS="true"; shift ;;
       --quiet) QUIET="true"; shift ;;
-      --threshold) THRESHOLD_KV="${2:-}"; shift 2 ;;
-      --threshold-caches) THRESHOLD_CACHES_MB="${2:-}"; THRESHOLD_CACHES_MB_SET="true"; shift 2 ;;
-      --threshold-logs) THRESHOLD_LOGS_MB="${2:-}"; THRESHOLD_LOGS_MB_SET="true"; shift 2 ;;
-      --threshold-leftovers) THRESHOLD_LEFTOVERS_MB="${2:-}"; THRESHOLD_LEFTOVERS_MB_SET="true"; shift 2 ;;
-      --threshold-disk) THRESHOLD_DISK_MB="${2:-}"; THRESHOLD_DISK_MB_SET="true"; shift 2 ;;
+      --threshold) _cli_require_value "$1" "${2:-}" "$#"; THRESHOLD_KV="$2"; shift 2 ;;
+      --threshold-caches) _cli_require_value "$1" "${2:-}" "$#"; THRESHOLD_CACHES_MB="$2"; THRESHOLD_CACHES_MB_SET="true"; shift 2 ;;
+      --threshold-logs) _cli_require_value "$1" "${2:-}" "$#"; THRESHOLD_LOGS_MB="$2"; THRESHOLD_LOGS_MB_SET="true"; shift 2 ;;
+      --threshold-leftovers) _cli_require_value "$1" "${2:-}" "$#"; THRESHOLD_LEFTOVERS_MB="$2"; THRESHOLD_LEFTOVERS_MB_SET="true"; shift 2 ;;
+      --threshold-disk) _cli_require_value "$1" "${2:-}" "$#"; THRESHOLD_DISK_MB="$2"; THRESHOLD_DISK_MB_SET="true"; shift 2 ;;
       -h|--help) usage; exit "${EXIT_OK:-0}" ;;
       # SAFETY: reject unknown flags to prevent accidental mode or apply changes
       *) echo "Unknown arg: $1" >&2; usage >&2; exit "${EXIT_USAGE:-2}" ;;
@@ -185,6 +189,16 @@ parse_args() {
 
   # Thresholds: validate and apply list overrides (if any)
   apply_threshold_overrides
+}
+
+_cli_require_value() {
+  local option="$1"
+  local value="${2:-}"
+  local count="${3:-0}"
+  if [[ "$count" -lt 2 || -z "$value" || "$value" == --* ]]; then
+    echo "${option} requires a value" >&2
+    exit "${EXIT_USAGE:-2}"
+  fi
 }
 
 _cli_resolve_version() {

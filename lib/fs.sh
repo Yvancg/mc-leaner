@@ -29,16 +29,17 @@ safe_move() {
   local dst_dir="$2"
 
   # No-op if the source does not exist (modules may race with system changes)
-  [[ -e "$src" ]] || return 0
-  ensure_dir "$dst_dir"
+  [[ -e "$src" || -L "$src" ]] || return 1
+  ensure_dir "$dst_dir" || return 1
 
   local base
   base="$(basename "$src")"
 
-  local dst="$dst_dir/$base"
-  if [[ -e "$dst" ]]; then
-    dst="$dst_dir/${base}_$(date +%Y%m%d_%H%M%S)"
-  fi
+  # Allocate a private container atomically. Keeping the original basename
+  # inside it avoids collisions without a check-then-move race.
+  local reservation
+  reservation="$(/usr/bin/mktemp -d "${dst_dir}/.mcleaner-item.XXXXXX" 2>/dev/null)" || return 1
+  local dst="${reservation}/${base}"
 
   local parent
   parent="$(dirname "$src")"
@@ -46,31 +47,40 @@ safe_move() {
   # SAFETY: try non-sudo first; escalate only for permission-style failures.
   local err rc
   err=""
-  set +e
   if [[ -w "$parent" ]]; then
-    err="$(mv "$src" "$dst" 2>&1)"
-    rc=$?
+    if err="$(LC_ALL=C /bin/mv "$src" "$dst" 2>&1)"; then
+      rc=0
+    else
+      rc=$?
+    fi
   else
     if [[ "${ALLOW_SUDO:-false}" != "true" ]]; then
       err="sudo disabled (use --allow-sudo)"
       rc=1
     else
-      err="$(sudo mv "$src" "$dst" 2>&1)"
-      rc=$?
+      if err="$(LC_ALL=C sudo /bin/mv "$src" "$dst" 2>&1)"; then
+        rc=0
+      else
+        rc=$?
+      fi
     fi
   fi
-  set -e
 
   if [[ $rc -ne 0 ]]; then
     # SAFETY: retry with sudo only when the first attempt was non-sudo and the error is permission-like.
     if [[ -w "$parent" ]] && { [[ "$err" == *"Operation not permitted"* ]] || [[ "$err" == *"Permission denied"* ]]; }; then
       if [[ "${ALLOW_SUDO:-false}" != "true" ]]; then
         echo "sudo disabled (use --allow-sudo)" >&2
+        rmdir "$reservation" 2>/dev/null || true
         return $rc
       fi
-      sudo mv "$src" "$dst"
+      if ! LC_ALL=C sudo /bin/mv "$src" "$dst"; then
+        rmdir "$reservation" 2>/dev/null || true
+        return "$rc"
+      fi
     else
       echo "$err" >&2
+      rmdir "$reservation" 2>/dev/null || true
       return $rc
     fi
   fi
@@ -96,11 +106,54 @@ backup_manifest_checksum_path() {
   printf '%s/.mcleaner_manifest.sha256' "$backup_dir"
 }
 
+backup_manifest_lock_acquire() {
+  local backup_dir="$1"
+  local lock_dir="${backup_dir}/.mcleaner-manifest.lock"
+  local attempts=0
+  local current_pid
+  current_pid="$(/bin/sh -c 'printf "%s" "$PPID"')"
+  [[ "$current_pid" =~ ^[0-9]+$ ]] || return 1
+  ensure_dir "$backup_dir" || return 1
+
+  while [[ "$attempts" -lt 200 ]]; do
+    if mkdir "$lock_dir" 2>/dev/null; then
+      printf '%s\n' "$current_pid" > "${lock_dir}/pid" 2>/dev/null || {
+        rmdir "$lock_dir" 2>/dev/null || true
+        return 1
+      }
+      return 0
+    fi
+
+    local owner_pid=""
+    if [[ -r "${lock_dir}/pid" ]]; then
+      IFS= read -r owner_pid < "${lock_dir}/pid" || owner_pid=""
+    fi
+    if [[ "$owner_pid" =~ ^[0-9]+$ ]] && ! kill -0 "$owner_pid" 2>/dev/null; then
+      rm -f "${lock_dir}/pid" 2>/dev/null || true
+      rmdir "$lock_dir" 2>/dev/null || true
+    fi
+
+    attempts=$((attempts + 1))
+    /bin/sleep 0.05
+  done
+
+  return 1
+}
+
+backup_manifest_lock_release() {
+  local backup_dir="$1"
+  local lock_dir="${backup_dir}/.mcleaner-manifest.lock"
+  rm -f "${lock_dir}/pid" 2>/dev/null || true
+  rmdir "$lock_dir" 2>/dev/null || true
+}
+
 backup_manifest_ensure_header() {
   # Purpose: ensure a header is present for v2 manifests
   local backup_dir="$1"
   local manifest
   manifest="$(backup_manifest_path "$backup_dir")" || return 1
+
+  [[ ! -L "$manifest" ]] || return 1
 
   if [[ -s "$manifest" ]]; then
     return 0
@@ -162,7 +215,7 @@ backup_manifest_checksum_update() {
   local backup_dir="$1"
   local manifest
   manifest="$(backup_manifest_path "$backup_dir")" || return 1
-  [[ -f "$manifest" ]] || return 1
+  [[ -f "$manifest" && ! -L "$manifest" ]] || return 1
 
   local checksum
   checksum="$(/usr/bin/shasum -a 256 "$manifest" 2>/dev/null | awk '{print $1}')"
@@ -170,6 +223,7 @@ backup_manifest_checksum_update() {
 
   local checksum_file
   checksum_file="$(backup_manifest_checksum_path "$backup_dir")" || return 1
+  [[ ! -L "$checksum_file" ]] || return 1
   printf '%s\n' "$checksum" > "$checksum_file" 2>/dev/null || return 1
   return 0
 }
@@ -185,10 +239,10 @@ backup_manifest_checksum_verify() {
   local manifest checksum_file expected_checksum actual_checksum
 
   manifest="$(backup_manifest_path "$backup_dir")" || return 3
-  [[ -f "$manifest" ]] || return 3
+  [[ -f "$manifest" && ! -L "$manifest" ]] || return 3
 
   checksum_file="$(backup_manifest_checksum_path "$backup_dir")" || return 3
-  [[ -f "$checksum_file" ]] || return 1
+  [[ -f "$checksum_file" && ! -L "$checksum_file" ]] || return 1
 
   expected_checksum="$(head -n 1 "$checksum_file" 2>/dev/null | tr -d '[:space:]')"
   actual_checksum="$(/usr/bin/shasum -a 256 "$manifest" 2>/dev/null | awk '{print $1}')"
@@ -201,18 +255,46 @@ backup_manifest_checksum_verify() {
   return 0
 }
 
-backup_manifest_append() {
-  # Purpose: record a move in the backup manifest (best-effort)
+_backup_manifest_append_locked() {
+  # Purpose: atomically record a move in the backup manifest.
   local src="$1"
   local dest="$2"
   local backup_dir="$3"
 
-  [[ -n "$backup_dir" && -n "$src" && -n "$dest" ]] || return 0
+  [[ -n "$backup_dir" && -n "$src" && -n "$dest" ]] || return 1
+  ensure_dir "$backup_dir" || return 1
 
-  local manifest
-  manifest="$(backup_manifest_path "$backup_dir")" || return 0
+  local manifest checksum_file
+  manifest="$(backup_manifest_path "$backup_dir")" || return 1
+  checksum_file="$(backup_manifest_checksum_path "$backup_dir")" || return 1
+  [[ ! -L "$manifest" && ! -L "$checksum_file" ]] || return 1
 
-  backup_manifest_ensure_header "$backup_dir" || true
+  local tmp_manifest tmp_checksum
+  tmp_manifest="$(/usr/bin/mktemp "${backup_dir}/.mcleaner-manifest.XXXXXX" 2>/dev/null)" || return 1
+  tmp_checksum="$(/usr/bin/mktemp "${backup_dir}/.mcleaner-checksum.XXXXXX" 2>/dev/null)" || {
+    rm -f "$tmp_manifest" 2>/dev/null || true
+    return 1
+  }
+
+  if [[ -s "$manifest" ]]; then
+    cp "$manifest" "$tmp_manifest" 2>/dev/null || {
+      rm -f "$tmp_manifest" "$tmp_checksum" 2>/dev/null || true
+      return 1
+    }
+  else
+    local created_at
+    created_at="$(/bin/date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || printf '')"
+    {
+      printf '%s\n' "# mcleaner_manifest_v=2"
+      printf '%s\n' "# created_at=${created_at}"
+      printf '%s\n' "# version=${MCLEANER_VERSION:-unknown}"
+      printf '%s\n' "# encoding=base64"
+      printf '%s\n' "# fields=epoch\tpath_src_b64\tpath_dest_b64"
+    } > "$tmp_manifest" 2>/dev/null || {
+      rm -f "$tmp_manifest" "$tmp_checksum" 2>/dev/null || true
+      return 1
+    }
+  fi
 
   local ts
   ts="$(/bin/date +%s 2>/dev/null || echo "")"
@@ -221,14 +303,72 @@ backup_manifest_append() {
   src_b64="$(printf '%s' "$src" | /usr/bin/base64 2>/dev/null | tr -d '\n')"
   dest_b64="$(printf '%s' "$dest" | /usr/bin/base64 2>/dev/null | tr -d '\n')"
 
-  [[ -n "$src_b64" && -n "$dest_b64" ]] || return 0
+  [[ -n "$src_b64" && -n "$dest_b64" ]] || {
+    rm -f "$tmp_manifest" "$tmp_checksum" 2>/dev/null || true
+    return 1
+  }
 
   # Format: epoch<TAB>src_b64<TAB>dest_b64
-  {
-    printf '%s\t%s\t%s\n' "$ts" "$src_b64" "$dest_b64"
-  } >> "$manifest" 2>/dev/null || true
+  printf '%s\t%s\t%s\n' "$ts" "$src_b64" "$dest_b64" >> "$tmp_manifest" 2>/dev/null || {
+    rm -f "$tmp_manifest" "$tmp_checksum" 2>/dev/null || true
+    return 1
+  }
 
-  backup_manifest_checksum_update "$backup_dir" || true
+  local checksum
+  checksum="$(/usr/bin/shasum -a 256 "$tmp_manifest" 2>/dev/null | awk '{print $1}')"
+  [[ -n "$checksum" ]] || {
+    rm -f "$tmp_manifest" "$tmp_checksum" 2>/dev/null || true
+    return 1
+  }
+  printf '%s\n' "$checksum" > "$tmp_checksum" 2>/dev/null || {
+    rm -f "$tmp_manifest" "$tmp_checksum" 2>/dev/null || true
+    return 1
+  }
+
+  # Install the checksum first. If the manifest replacement fails, restore a
+  # checksum for the previous manifest so an existing backup remains usable.
+  if ! /bin/mv "$tmp_checksum" "$checksum_file" 2>/dev/null; then
+    rm -f "$tmp_manifest" "$tmp_checksum" 2>/dev/null || true
+    return 1
+  fi
+  if ! /bin/mv "$tmp_manifest" "$manifest" 2>/dev/null; then
+    rm -f "$tmp_manifest" 2>/dev/null || true
+    backup_manifest_checksum_update "$backup_dir" || true
+    return 1
+  fi
+
+  return 0
+}
+
+backup_manifest_append() {
+  local src="$1"
+  local dest="$2"
+  local backup_dir="$3"
+  local rc
+
+  backup_manifest_lock_acquire "$backup_dir" || return 1
+  if _backup_manifest_append_locked "$src" "$dest" "$backup_dir"; then
+    rc=0
+  else
+    rc=$?
+  fi
+  backup_manifest_lock_release "$backup_dir"
+  return "$rc"
+}
+
+backup_manifest_preflight() {
+  local backup_dir="$1"
+  [[ -n "$backup_dir" ]] || return 1
+  ensure_dir "$backup_dir" || return 1
+
+  local manifest checksum_file probe
+  manifest="$(backup_manifest_path "$backup_dir")" || return 1
+  checksum_file="$(backup_manifest_checksum_path "$backup_dir")" || return 1
+  [[ ! -L "$manifest" && ! -L "$checksum_file" ]] || return 1
+
+  probe="$(/usr/bin/mktemp "${backup_dir}/.mcleaner-preflight.XXXXXX" 2>/dev/null)" || return 1
+  rm -f "$probe" 2>/dev/null || return 1
+  return 0
 }
 
 # ----------------------------
@@ -268,18 +408,40 @@ move_attempt() {
   MOVE_LAST_MESSAGE=""
   MOVE_LAST_DEST=""
 
-  if [[ ! -e "$src" ]]; then
+  if [[ ! -e "$src" && ! -L "$src" ]]; then
     MOVE_LAST_STATUS="skipped"
     MOVE_LAST_CODE="not_found"
     MOVE_LAST_MESSAGE="source does not exist"
     return 1
   fi
 
+  if declare -F is_protected_path >/dev/null 2>&1 && is_protected_path "$src"; then
+    MOVE_LAST_STATUS="skipped"
+    MOVE_LAST_CODE="protected"
+    MOVE_LAST_MESSAGE="protected security or endpoint software path"
+    return 1
+  fi
+
+  if declare -F is_report_only_system_path >/dev/null 2>&1 && is_report_only_system_path "$src"; then
+    MOVE_LAST_STATUS="skipped"
+    MOVE_LAST_CODE="system_path"
+    MOVE_LAST_MESSAGE="system launchd and log paths are report-only"
+    return 1
+  fi
+
+  if ! backup_manifest_preflight "$backup_dir"; then
+    MOVE_LAST_STATUS="failed"
+    MOVE_LAST_CODE="manifest"
+    MOVE_LAST_MESSAGE="backup manifest is not writable"
+    return 1
+  fi
+
   local out rc
-  set +e
-  out="$(safe_move "$src" "$backup_dir" 2>&1)"
-  rc=$?
-  set -e
+  if out="$(safe_move "$src" "$backup_dir" 2>&1)"; then
+    rc=0
+  else
+    rc=$?
+  fi
 
   if [[ $rc -ne 0 ]]; then
     classify_move_error "$out"
@@ -288,11 +450,24 @@ move_attempt() {
     return 1
   fi
 
+  if ! backup_manifest_append "$src" "$out" "$backup_dir"; then
+    local rollback_message=""
+    if rollback_message="$(safe_restore "$out" "$src" 2>&1)"; then
+      MOVE_LAST_STATUS="failed"
+      MOVE_LAST_CODE="manifest"
+      MOVE_LAST_MESSAGE="manifest update failed; move rolled back"
+    else
+      MOVE_LAST_STATUS="failed"
+      MOVE_LAST_CODE="manifest"
+      MOVE_LAST_DEST="$out"
+      MOVE_LAST_MESSAGE="manifest update failed; rollback failed: ${rollback_message}; item remains at ${out}"
+    fi
+    return 1
+  fi
+
   MOVE_LAST_STATUS="moved"
   MOVE_LAST_DEST="$out"
   MOVE_LAST_MESSAGE="moved"
-
-  backup_manifest_append "$src" "$out" "$backup_dir"
   return 0
 }
 
@@ -306,14 +481,19 @@ safe_restore() {
   # Output: echoes destination path on success.
   local backup_path="$1"
   local restore_path="$2"
+  local source_identity source_device
 
-  [[ -e "$backup_path" ]] || return 1
+  [[ -e "$backup_path" || -L "$backup_path" ]] || return 1
   [[ -n "$restore_path" ]] || return 1
 
-  if [[ -e "$restore_path" ]]; then
+  if [[ -e "$restore_path" || -L "$restore_path" ]]; then
     echo "restore target exists" >&2
     return 1
   fi
+
+  source_identity="$(/usr/bin/stat -f '%d:%i' "$backup_path" 2>/dev/null)"
+  source_device="${source_identity%%:*}"
+  [[ -n "$source_identity" ]] || return 1
 
   local parent
   parent="$(dirname "$restore_path")"
@@ -330,20 +510,24 @@ safe_restore() {
 
   local err rc
   err=""
-  set +e
   if [[ -w "$parent" ]]; then
-    err="$(mv "$backup_path" "$restore_path" 2>&1)"
-    rc=$?
+    if err="$(LC_ALL=C /bin/mv -n "$backup_path" "$restore_path" 2>&1)"; then
+      rc=0
+    else
+      rc=$?
+    fi
   else
     if [[ "${ALLOW_SUDO:-false}" != "true" ]]; then
       err="sudo disabled (use --allow-sudo)"
       rc=1
     else
-      err="$(sudo mv "$backup_path" "$restore_path" 2>&1)"
-      rc=$?
+      if err="$(LC_ALL=C sudo /bin/mv -n "$backup_path" "$restore_path" 2>&1)"; then
+        rc=0
+      else
+        rc=$?
+      fi
     fi
   fi
-  set -e
 
   if [[ $rc -ne 0 ]]; then
     if [[ -w "$parent" ]] && { [[ "$err" == *"Operation not permitted"* ]] || [[ "$err" == *"Permission denied"* ]]; }; then
@@ -351,12 +535,39 @@ safe_restore() {
         echo "sudo disabled (use --allow-sudo)" >&2
         return $rc
       fi
-      sudo mv "$backup_path" "$restore_path"
+      LC_ALL=C sudo /bin/mv -n "$backup_path" "$restore_path" || return "$rc"
     else
       echo "$err" >&2
       return $rc
     fi
   fi
+
+  # BSD mv -n exits successfully when it declines an overwrite. Verify that
+  # the source actually moved so a race cannot be reported as a restore.
+  if [[ -e "$backup_path" || -L "$backup_path" ]]; then
+    echo "restore target exists" >&2
+    return 1
+  fi
+
+  local restored_identity parent_device
+  restored_identity="$(/usr/bin/stat -f '%d:%i' "$restore_path" 2>/dev/null || true)"
+  parent_device="$(/usr/bin/stat -f '%d' "$parent" 2>/dev/null || true)"
+  if [[ -n "$parent_device" && "$source_device" == "$parent_device" && "$restored_identity" != "$source_identity" ]]; then
+    local nested_path nested_identity
+    nested_path="${restore_path}/$(basename "$backup_path")"
+    nested_identity="$(/usr/bin/stat -f '%d:%i' "$nested_path" 2>/dev/null || true)"
+    if [[ "$nested_identity" == "$source_identity" ]]; then
+      /bin/mv -n "$nested_path" "$backup_path" 2>/dev/null || true
+    fi
+    echo "restore target changed during move" >&2
+    return 1
+  fi
+
+  local backup_container
+  backup_container="$(dirname "$backup_path")"
+  case "$(basename "$backup_container")" in
+    .mcleaner-item.*) rmdir "$backup_container" 2>/dev/null || true ;;
+  esac
 
   echo "$restore_path"
 }
@@ -364,6 +575,19 @@ safe_restore() {
 # ----------------------------
 # Symlink resolution
 # ----------------------------
+
+# Resolve parent directories physically while preserving the final directory
+# entry. This is used when the entry itself may be a symlink that must be moved
+# or restored rather than followed.
+fs_physical_entry_path() {
+  local path="$1"
+  local parent parent_real base
+  [[ -n "$path" ]] || return 1
+  parent="$(dirname "$path")"
+  base="$(basename "$path")"
+  parent_real="$(cd "$parent" 2>/dev/null && pwd -P)" || return 1
+  printf '%s/%s' "${parent_real%/}" "$base"
+}
 
 # Purpose: Resolve a symlink chain to its final physical target.
 # Contract:

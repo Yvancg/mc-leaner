@@ -328,13 +328,11 @@ run_logs_module() {
 
       scanned_dirs=$((scanned_dirs + 1))
 
-      # Skip known protected/security patterns (best-effort)
-      case "$child" in
-        *bitdefender*|*malwarebytes*|*crowdstrike*|*sentinel*|*sophos*|*carbonblack*|*defender*|*endpoint*)
-          _logs_explain "Logs: SKIP (protected): $child"
-          continue
-          ;;
-      esac
+      # Use the shared case-insensitive protection policy when available.
+      if declare -F is_protected_path >/dev/null 2>&1 && is_protected_path "$child"; then
+        _logs_explain "Logs: SKIP (protected): $child"
+        continue
+      fi
 
       # Size in KB
       local kb
@@ -448,24 +446,8 @@ run_logs_module() {
           fi
         fi
       else
-        # System logs require explicit confirmation
-        log "Logs: system path detected (confirm carefully): $path"
-        if _logs_confirm_move "$path"; then
-          local move_out=""
-          if move_out="$(_logs_move_to_backup "$path" "$backup_dir")"; then
-            moved_count=$((moved_count + 1))
-          else
-            move_failures+=("${path} | ${move_out}")
-            log "Logs: move failed: ${path} | ${move_out}"
-          fi
-        else
-          local rc=$?
-          if [[ "$rc" -eq 2 ]]; then
-            _logs_explain "Logs: SKIP (non-interactive; cannot prompt): $path"
-          else
-            _logs_explain "Logs: SKIP (user declined): $path"
-          fi
-        fi
+        log "Logs: SKIP (system report-only): $path"
+        _logs_explain "Logs: system log paths are never relocated"
       fi
     fi
 

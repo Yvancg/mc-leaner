@@ -107,12 +107,18 @@ Shared logic belongs in `lib/`, not duplicated across modules.
    ```
 
 3. Make your changes
-4. Ensure:
+4. Run the project checks:
+
+   ```bash
+   bash scripts/ci.sh
+   ```
+
+5. Ensure:
    - Shell scripts remain compatible with Bash 3.2
    - No GNU-only utilities without fallbacks
    - No destructive behavior by default
-5. Update documentation if behavior changes
-6. Open a pull request with:
+6. Update documentation if behavior changes
+7. Open a pull request with:
    - clear explanation of the change
    - reasoning for safety impact
    - example output (dry-run)

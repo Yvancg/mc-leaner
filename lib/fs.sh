@@ -110,27 +110,21 @@ backup_manifest_lock_acquire() {
   local backup_dir="$1"
   local lock_dir="${backup_dir}/.mcleaner-manifest.lock"
   local attempts=0
-  local current_pid
-  current_pid="$(/bin/sh -c 'printf "%s" "$PPID"')"
-  [[ "$current_pid" =~ ^[0-9]+$ ]] || return 1
+  local max_attempts="${MCLEANER_LOCK_ATTEMPTS:-200}"
+  local current_pid="$$"
+  local current_token="${current_pid}:${RANDOM:-0}:${RANDOM:-0}"
+  [[ "$max_attempts" =~ ^[0-9]+$ && "$max_attempts" -gt 0 ]] || max_attempts=200
+  BACKUP_MANIFEST_LOCK_TOKEN=""
   ensure_dir "$backup_dir" || return 1
 
-  while [[ "$attempts" -lt 200 ]]; do
+  while [[ "$attempts" -lt "$max_attempts" ]]; do
     if mkdir "$lock_dir" 2>/dev/null; then
-      printf '%s\n' "$current_pid" > "${lock_dir}/pid" 2>/dev/null || {
+      printf '%s\t%s\n' "$current_pid" "$current_token" > "${lock_dir}/pid" 2>/dev/null || {
         rmdir "$lock_dir" 2>/dev/null || true
         return 1
       }
+      BACKUP_MANIFEST_LOCK_TOKEN="$current_token"
       return 0
-    fi
-
-    local owner_pid=""
-    if [[ -r "${lock_dir}/pid" ]]; then
-      IFS= read -r owner_pid < "${lock_dir}/pid" || owner_pid=""
-    fi
-    if [[ "$owner_pid" =~ ^[0-9]+$ ]] && ! kill -0 "$owner_pid" 2>/dev/null; then
-      rm -f "${lock_dir}/pid" 2>/dev/null || true
-      rmdir "$lock_dir" 2>/dev/null || true
     fi
 
     attempts=$((attempts + 1))
@@ -142,7 +136,13 @@ backup_manifest_lock_acquire() {
 
 backup_manifest_lock_release() {
   local backup_dir="$1"
+  local expected_token="$2"
   local lock_dir="${backup_dir}/.mcleaner-manifest.lock"
+  local owner_pid="" owner_token=""
+  if [[ -r "${lock_dir}/pid" ]]; then
+    IFS=$'\t' read -r owner_pid owner_token < "${lock_dir}/pid" || owner_pid=""
+  fi
+  [[ "$owner_pid" == "$$" && -n "$expected_token" && "$owner_token" == "$expected_token" ]] || return 1
   rm -f "${lock_dir}/pid" 2>/dev/null || true
   rmdir "$lock_dir" 2>/dev/null || true
 }
@@ -344,15 +344,16 @@ backup_manifest_append() {
   local src="$1"
   local dest="$2"
   local backup_dir="$3"
-  local rc
+  local rc lock_token
 
   backup_manifest_lock_acquire "$backup_dir" || return 1
+  lock_token="$BACKUP_MANIFEST_LOCK_TOKEN"
   if _backup_manifest_append_locked "$src" "$dest" "$backup_dir"; then
     rc=0
   else
     rc=$?
   fi
-  backup_manifest_lock_release "$backup_dir"
+  backup_manifest_lock_release "$backup_dir" "$lock_token"
   return "$rc"
 }
 
@@ -508,6 +509,13 @@ safe_restore() {
     fi
   fi
 
+  local parent_device
+  parent_device="$(/usr/bin/stat -f '%d' "$parent" 2>/dev/null || true)"
+  if [[ -z "$parent_device" || "$source_device" != "$parent_device" ]]; then
+    echo "cross-volume restore is not supported safely; restore this item manually" >&2
+    return 1
+  fi
+
   local err rc
   err=""
   if [[ -w "$parent" ]]; then
@@ -549,10 +557,9 @@ safe_restore() {
     return 1
   fi
 
-  local restored_identity parent_device
+  local restored_identity
   restored_identity="$(/usr/bin/stat -f '%d:%i' "$restore_path" 2>/dev/null || true)"
-  parent_device="$(/usr/bin/stat -f '%d' "$parent" 2>/dev/null || true)"
-  if [[ -n "$parent_device" && "$source_device" == "$parent_device" && "$restored_identity" != "$source_identity" ]]; then
+  if [[ "$restored_identity" != "$source_identity" ]]; then
     local nested_path nested_identity
     nested_path="${restore_path}/$(basename "$backup_path")"
     nested_identity="$(/usr/bin/stat -f '%d:%i' "$nested_path" 2>/dev/null || true)"

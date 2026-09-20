@@ -38,20 +38,22 @@ is_protected_path() {
 is_report_only_system_path() {
   local path="$1"
   local physical_path="$path"
-  local parent parent_real
+  local parent parent_real normalized_path normalized_physical
   parent="$(dirname "$path")"
   parent_real="$(cd "$parent" 2>/dev/null && pwd -P)" || parent_real=""
   if [[ -n "$parent_real" ]]; then
     physical_path="${parent_real}/$(basename "$path")"
   fi
+  normalized_path="$(printf '%s' "$path" | tr '[:upper:]' '[:lower:]')"
+  normalized_physical="$(printf '%s' "$physical_path" | tr '[:upper:]' '[:lower:]')"
 
-  case "$path" in
-    /Library/LaunchAgents|/Library/LaunchAgents/*|/Library/LaunchDaemons|/Library/LaunchDaemons/*|/Library/Logs|/Library/Logs/*|/var/log|/var/log/*|/private/var/log|/private/var/log/*)
+  case "$normalized_path" in
+    /library/launchagents|/library/launchagents/*|/library/launchdaemons|/library/launchdaemons/*|/library/logs|/library/logs/*|/var/log|/var/log/*|/private/var/log|/private/var/log/*|/system/volumes/data/library/launchagents|/system/volumes/data/library/launchagents/*|/system/volumes/data/library/launchdaemons|/system/volumes/data/library/launchdaemons/*|/system/volumes/data/library/logs|/system/volumes/data/library/logs/*|/system/volumes/data/private/var/log|/system/volumes/data/private/var/log/*)
       return 0
       ;;
   esac
-  case "$physical_path" in
-    /Library/LaunchAgents|/Library/LaunchAgents/*|/Library/LaunchDaemons|/Library/LaunchDaemons/*|/Library/Logs|/Library/Logs/*|/var/log|/var/log/*|/private/var/log|/private/var/log/*)
+  case "$normalized_physical" in
+    /library/launchagents|/library/launchagents/*|/library/launchdaemons|/library/launchdaemons/*|/library/logs|/library/logs/*|/var/log|/var/log/*|/private/var/log|/private/var/log/*|/system/volumes/data/library/launchagents|/system/volumes/data/library/launchagents/*|/system/volumes/data/library/launchdaemons|/system/volumes/data/library/launchdaemons/*|/system/volumes/data/library/logs|/system/volumes/data/library/logs/*|/system/volumes/data/private/var/log|/system/volumes/data/private/var/log/*)
       return 0
       ;;
   esac

@@ -94,6 +94,8 @@ test_system_launchd_and_log_paths_are_report_only() {
   trap 'rm -rf -- "$TEST_SANDBOX"' EXIT
 
   is_report_only_system_path "/Library/LaunchAgents" || return 1
+  is_report_only_system_path "/library/launchagents/com.example.test.plist" || return 1
+  is_report_only_system_path "/System/Volumes/Data/Library/Logs/example.log" || return 1
   is_report_only_system_path "/Library/LaunchDaemons/com.example.test.plist" || return 1
   is_report_only_system_path "/Library/Logs/example.log" || return 1
   is_report_only_system_path "/var/log/example.log" || return 1
@@ -105,16 +107,17 @@ test_system_launchd_and_log_paths_are_report_only() {
 }
 
 test_parallel_moves_preserve_all_manifest_entries() {
-  local sandbox backup i pid records payloads
+  local sandbox backup i pid records payloads workers
   local -a pids
   sandbox="$(mktemp -d -t mcleaner-fs.XXXXXX)" || return 1
   TEST_SANDBOX="$sandbox"
   trap 'rm -rf -- "$TEST_SANDBOX"' EXIT
   backup="$sandbox/backup"
+  workers=24
   pids=()
 
   i=1
-  while [[ "$i" -le 12 ]]; do
+  while [[ "$i" -le "$workers" ]]; do
     mkdir -p "$sandbox/src-$i"
     printf '%s\n' "$i" > "$sandbox/src-$i/item.txt"
     (move_attempt "$sandbox/src-$i/item.txt" "$backup") &
@@ -132,9 +135,28 @@ test_parallel_moves_preserve_all_manifest_entries() {
     [[ -e "$payload" || -L "$payload" ]] || continue
     payloads=$((payloads + 1))
   done
-  assert_eq "12" "$records" "manifest records" || return 1
-  assert_eq "12" "$payloads" "backup payloads" || return 1
+  assert_eq "$workers" "$records" "manifest records" || return 1
+  assert_eq "$workers" "$payloads" "backup payloads" || return 1
   backup_manifest_checksum_verify "$backup"
+}
+
+test_abandoned_manifest_lock_fails_closed() {
+  local sandbox backup src
+  sandbox="$(mktemp -d -t mcleaner-fs.XXXXXX)" || return 1
+  TEST_SANDBOX="$sandbox"
+  trap 'rm -rf -- "$TEST_SANDBOX"' EXIT
+  backup="$sandbox/backup"
+  src="$sandbox/source.txt"
+  mkdir -p "$backup/.mcleaner-manifest.lock"
+  printf '999999\tstale\n' > "$backup/.mcleaner-manifest.lock/pid"
+  printf 'payload\n' > "$src"
+  MCLEANER_LOCK_ATTEMPTS=2
+
+  if move_attempt "$src" "$backup"; then
+    return 1
+  fi
+  assert_file_exists "$src" || return 1
+  assert_eq "manifest" "$MOVE_LAST_CODE" "failure classification"
 }
 
 test_cli_restores_dangling_symlink_payload() {
@@ -191,6 +213,7 @@ run_test "protected paths are rejected centrally" test_protected_path_is_never_m
 run_test "restore refuses dangling symlink targets" test_restore_refuses_dangling_symlink_target
 run_test "system launchd and log paths are report-only" test_system_launchd_and_log_paths_are_report_only
 run_test "parallel moves preserve every manifest entry" test_parallel_moves_preserve_all_manifest_entries
+run_test "abandoned manifest lock fails closed" test_abandoned_manifest_lock_fails_closed
 run_test "CLI restores a dangling symlink payload" test_cli_restores_dangling_symlink_payload
 run_test "backup verification fails for missing payloads" test_verify_fails_when_payload_is_missing
 finish_tests

@@ -28,6 +28,8 @@ mc-leaner guarantees the following:
 - Built-in restore helpers are available via `--list-backups` and `--restore-backup`
 - If a move cannot be recorded, mc-leaner immediately attempts to roll it back and reports the backup location if rollback also fails
 - Restore uses a checksum-validated manifest to detect accidental corruption
+- Built-in restore fails closed across filesystem volumes; those items must be moved back manually
+- Manifest locks are never reclaimed automatically; after an interrupted run, confirm no mc-leaner process is active before removing `.mcleaner-manifest.lock`
 - A reboot restores normal launchd behavior once files are restored
 
 ### 4. Explicit user consent

@@ -10,9 +10,37 @@ This project follows a pragmatic versioning scheme:
 
 ---
 
+## v2.5.1 — Filesystem and cleanup safety hardening
+
+**Release date:** 2026-09-20
+
+### Added
+
+- Explicit `--intel-report <path>` output; default scans no longer create or overwrite `~/Desktop/intel_binaries.txt`
+- Bash 3.2-compatible regression tests for move/restore safety, prompts, protected paths, CLI parsing, and Intel report output
+- CI syntax checks and automated execution of the regression suite
+
+### Changed
+
+- Backup moves use collision-proof destinations and serialized, atomic manifest updates
+- GUI move confirmations default to Cancel
+- Security-product checks are case-insensitive and enforced at the shared move boundary
+- System launchd definitions and system logs are report-only, including macOS Data-volume aliases
+- Cross-volume restores fail closed and require manual restoration
+
+### Fixed
+
+- Moves are rolled back when manifest recording fails
+- Concurrent runs no longer lose manifest entries
+- Restore refuses dangling destination symlinks and detects destination races
+- Dangling symlink payloads can be restored through the CLI
+- Backup verification fails when a manifest payload is missing
+- Missing CLI option values return a stable usage error
+- Intel report output rejects symlink and directory destinations
+
 ## v2.5.0 — Contracts, verification, and automation readiness
 
-**Release date:** Unreleased
+**Release date:** 2026-02-04
 
 ### Added
 
@@ -32,16 +60,6 @@ This project follows a pragmatic versioning scheme:
 ### Fixed
 
 - Legacy backup restore can proceed with explicit acknowledgement
-- Default scans no longer create or overwrite `~/Desktop/intel_binaries.txt`; use `--intel-report` to persist it
-- Backup moves use collision-proof destinations and attempt immediate rollback when manifest recording fails
-- GUI move confirmations default to Cancel
-- Security-product checks are case-insensitive and enforced at the shared move boundary
-- System launchd definitions and logs are report-only
-- Backup verification now fails when a manifest payload is missing
-
-### Tests
-
-- Added Bash 3.2-compatible regression tests for move/restore safety, prompts, protected paths, and Intel report output
 
 ## v2.4.0 — Output, restore safety, and configurability
 

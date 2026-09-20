@@ -62,11 +62,21 @@ If you want to understand what is running on your systemâ€”and clean it safelyâ€
 
 ## What mc-leaner does (current)
 
-As of v2.5.0, all modules follow a strict inspection-first contract, share a unified inventory core, and produce explicit, reviewable run summaries.
+As of v2.5.1, all modules follow a strict inspection-first contract, share a unified inventory core, and produce explicit, reviewable run summaries.
 
 ### Release highlights
 
-#### v2.5.0 (in progress)
+#### v2.5.1 (released)
+
+**Filesystem and cleanup safety hardening**
+
+- Collision-proof, concurrency-safe backup manifests with rollback on recording failure
+- Case-insensitive protected-product checks at the shared move boundary
+- System launchd definitions and logs are report-only
+- Intel reports are persisted only with explicit `--intel-report`
+- Bash 3.2 regression suite for filesystem safety, prompts, restore, and CLI behavior
+
+#### v2.5.0 (released)
 
 **Contracts, verification, and automation readiness**
 

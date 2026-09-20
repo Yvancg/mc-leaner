@@ -275,7 +275,7 @@ Focus: **output flexibility and restore safety**
 
 ---
 
-## v2.5.0 (in progress)
+## v2.5.0 (released)
 
 Focus: **contracts and automation readiness**
 
@@ -284,6 +284,19 @@ Focus: **contracts and automation readiness**
 - Backup verification (`--verify-backup`) and manifest headers
 - Prompt controls (`--no-gui`, `--gui`) and `--quiet`
 - `--allow-sudo` gate for privileged moves/restores
+
+---
+
+## v2.5.1 (released)
+
+Focus: **filesystem and cleanup safety hardening**
+
+- Collision-proof, concurrency-safe backup manifests
+- Rollback when manifest recording fails
+- Shared case-insensitive protection checks
+- Report-only system launchd and log paths
+- Explicit Intel report output
+- Bash 3.2 safety regression suite
 
 ---
 

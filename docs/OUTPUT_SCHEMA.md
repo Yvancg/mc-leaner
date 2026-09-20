@@ -11,7 +11,7 @@ This document defines the JSON summary contract for mc-leaner.
 ```json
 {
   "meta": {
-    "version": "2.5.0",
+    "version": "2.5.1",
     "schema_version": "1",
     "mode": "scan",
     "apply": false,

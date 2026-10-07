@@ -1,0 +1,50 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Run CI checks
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+        run: bash scripts/ci.sh
+
+      - name: Build release archive
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          staging="dist/mc-leaner"
+          mkdir -p "$staging"
+          cp mc-leaner.sh "$staging/"
+          cp -R lib modules "$staging/"
+          for path in README.md LICENSE CHANGELOG.md SECURITY.md docs; do
+            if [ -e "$path" ]; then
+              cp -R "$path" "$staging/"
+            fi
+          done
+          tar -C dist -czf "dist/mc-leaner-${TAG}.tar.gz" mc-leaner
+          shasum -a 256 "dist/mc-leaner-${TAG}.tar.gz" > "dist/mc-leaner-${TAG}.tar.gz.sha256"
+
+      - name: Publish GitHub release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --generate-notes
+          gh release upload "$TAG"             "dist/mc-leaner-${TAG}.tar.gz"             "dist/mc-leaner-${TAG}.tar.gz.sha256"             --clobber
